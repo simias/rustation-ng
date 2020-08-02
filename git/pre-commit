@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Pre-commit hook that checks
+
+# Recover the part of the branch name before the first / (or the full branch
+# name if there's no /)
+branch_prefix=$(git rev-parse --abbrev-ref HEAD | sed 's,/.*,,')
+
+# Stash non-staged modifications to only run the checks on the staged changes
+stash=$(mktemp --tmpdir git-stash.XXXXXXX)
+git diff --full-index --binary > "$stash"
+# Also save into an actual git stash in case something goes wrong. We can't only
+# use the git stash because otherwise we may have conflicts when re-applying the
+# changes post-commit
+git stash -q --keep-index
+
+ret=0
+
+# The actual tests go here
+cargo test --quiet || ret=$?
+cargo clippy -- -D warnings || ret=$?
+cargo fmt -- --check || ret=$?
+
+# Restore stashed changes (if necessary)
+if [ -s "$stash" ]
+then
+    git apply --whitespace=nowarn < "$stash" && git stash drop -q
+    rm "$stash"
+fi
+
+if [ "$branch_prefix" = "dev" ]
+then
+    # Ignore errors
+    exit 0
+else
+    exit $ret
+fi
