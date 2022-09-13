@@ -1,43 +1,28 @@
 use crate::psx::iso9660;
 use cdimage::CdError;
 use std::io;
+use thiserror::Error;
 
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = ::std::result::Result<T, PsxError>;
 
-#[derive(Debug)]
-pub enum Error {
-    IoError(io::Error),
-    /// We couldn't find the disc's serial number
+#[derive(Error, Debug)]
+pub enum PsxError {
+    #[error("Input output error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("We couldn't find the disc's serial number")]
     NoSerialNumber,
-    /// The provided BIOS is unknown
+    #[error("The provided BIOS is unknown")]
     UnknownBios,
-    /// We couldn't find a suitable BIOS
+    #[error("We couldn't find a suitable BIOS")]
     NoBiosFound,
-    /// Invalid BIOS file
+    #[error("Invalid BIOS file `{0}`")]
     BadBios(String),
-    /// Something went wrong while communicating with the frontend
+    #[error("Something went wrong while communicating with the frontend: `{0}`")]
     FrontendError(String),
-    CdError(CdError),
-    /// The disc format was incorrect (i.e. probably not a valid PSX disc image)
+    #[error("CD layer error: {0}")]
+    CdError(#[from] CdError),
+    #[error("The disc format was incorrect (i.e. probably not a valid PSX disc image): `{0}`")]
     BadDiscFormat(String),
-    /// CD ISO filesystem error
-    IsoError(iso9660::Error),
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::IoError(e)
-    }
-}
-
-impl From<CdError> for Error {
-    fn from(e: CdError) -> Self {
-        Error::CdError(e)
-    }
-}
-
-impl From<iso9660::Error> for Error {
-    fn from(e: iso9660::Error) -> Self {
-        Error::IsoError(e)
-    }
+    #[error("CD ISO filesystem error: `{0}`")]
+    IsoError(#[from] iso9660::IsoError),
 }

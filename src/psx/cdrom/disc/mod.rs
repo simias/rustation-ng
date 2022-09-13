@@ -5,8 +5,10 @@ use cdimage::msf::Msf;
 use cdimage::Image;
 
 use super::iso9660;
-use crate::error::{Error, Result};
+use crate::error::{PsxError, Result};
 use crate::psx::gpu::VideoStandard;
+
+pub use cache::Cache as CdCache;
 
 mod cache;
 
@@ -16,7 +18,7 @@ mod cache;
 /// support audio tracks anyway...
 pub struct Disc {
     /// Disc image
-    cache: cache::Cache,
+    cache: CdCache,
     /// Disc serial number
     serial: SerialNumber,
 }
@@ -24,7 +26,7 @@ pub struct Disc {
 impl Disc {
     /// Reify a disc using `image` as a backend.
     pub fn new(image: Box<dyn Image + Send>) -> Result<Disc> {
-        let mut cache = cache::Cache::new(image);
+        let mut cache = CdCache::new(image);
 
         let serial = extract_serial_number(&mut cache)?;
 
@@ -46,7 +48,7 @@ impl Disc {
         self.serial
     }
 
-    pub fn image(&mut self) -> &mut dyn Image {
+    pub fn image(&mut self) -> &mut CdCache {
         &mut self.cache
     }
 }
@@ -82,20 +84,20 @@ impl SerialNumber {
     /// name of the form "aaaa_ddd.dd"
     fn from_bin_name(bin: &[u8]) -> Result<SerialNumber> {
         if bin.len() != 11 {
-            return Err(Error::NoSerialNumber);
+            return Err(PsxError::NoSerialNumber);
         }
 
         if bin[4] != b'_' {
             // This will fail for the few "lightspan educational" discs since they have a serial
             // number looking like "LSP-123456". Those games are fairly obscure and some of them
             // seem to have weird and nonstandards SYSTEM.CNF anyway.
-            return Err(Error::NoSerialNumber);
+            return Err(PsxError::NoSerialNumber);
         }
 
         let mut serial = [0u8; 10];
 
         fn to_upper(b: u8) -> u8 {
-            if b >= b'a' && b <= b'z' {
+            if b.is_ascii_lowercase() {
                 b - b'a' + b'A'
             } else {
                 b
@@ -165,7 +167,7 @@ pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
         "LicensedbySonyComputerEntertainmentEurope" => Region::Europe,
         _ => {
             let m = format!("Couldn't identify disc region string: {}", license);
-            return Err(Error::BadDiscFormat(m));
+            return Err(PsxError::BadDiscFormat(m));
         }
     };
 
@@ -174,7 +176,7 @@ pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
 
 /// Attempt to extract the serial number of the disc. All officially
 /// licensed PlayStation game should have a serial number.
-fn extract_serial_number(image: &mut dyn Image) -> Result<SerialNumber> {
+fn extract_serial_number(image: &mut CdCache) -> Result<SerialNumber> {
     let system_cnf = read_system_cnf(image)?;
 
     // Now we need to parse the SYSTEM.CNF file to get the content of the "BOOT" line
@@ -196,7 +198,7 @@ fn extract_serial_number(image: &mut dyn Image) -> Result<SerialNumber> {
         Some(b) => b,
         None => {
             warn!("Couldn't find BOOT line in SYSTEM.CNF");
-            return Err(Error::NoSerialNumber);
+            return Err(PsxError::NoSerialNumber);
         }
     };
 
@@ -210,12 +212,12 @@ fn extract_serial_number(image: &mut dyn Image) -> Result<SerialNumber> {
             "Unexpected boot path: {}",
             String::from_utf8_lossy(boot_path)
         );
-        return Err(Error::NoSerialNumber);
+        return Err(PsxError::NoSerialNumber);
     }
 
     let bin_name = path[path.len() - 2];
 
-    let serial = SerialNumber::from_bin_name(&bin_name);
+    let serial = SerialNumber::from_bin_name(bin_name);
 
     if serial.is_err() {
         warn!("Unexpected bin name: {}", String::from_utf8_lossy(bin_name));
@@ -224,7 +226,7 @@ fn extract_serial_number(image: &mut dyn Image) -> Result<SerialNumber> {
     serial
 }
 
-fn read_system_cnf(image: &mut dyn Image) -> Result<Vec<u8>> {
+fn read_system_cnf(image: &mut CdCache) -> Result<Vec<u8>> {
     let dir = iso9660::open_image(image)?;
 
     let system_cnf = dir.entry_by_name(b"SYSTEM.CNF;1")?;
@@ -235,7 +237,7 @@ fn read_system_cnf(image: &mut dyn Image) -> Result<Vec<u8>> {
 
     if len > 1024 * 1024 {
         let desc = format!("SYSTEM.CNF is too big: {}B", len);
-        return Err(Error::BadDiscFormat(desc));
+        return Err(PsxError::BadDiscFormat(desc));
     }
 
     let system_cnf = system_cnf.read_file(image)?;

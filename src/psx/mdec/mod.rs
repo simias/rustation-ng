@@ -506,11 +506,7 @@ enum State {
 
 impl State {
     fn is_busy(&self) -> bool {
-        if let State::Idle = self {
-            false
-        } else {
-            true
-        }
+        matches!(self, State::Idle)
     }
 }
 
@@ -551,10 +547,7 @@ impl Command {
     }
 
     fn is_monochrome(self) -> bool {
-        match self.output_depth() {
-            OutputDepth::D4 | OutputDepth::D8 => true,
-            _ => false,
-        }
+        matches!(self.output_depth(), OutputDepth::D4 | OutputDepth::D8)
     }
 
     /// Returns the value that should be written to the MSB when outputting 15bpp

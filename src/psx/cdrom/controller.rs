@@ -228,15 +228,15 @@ impl Controller {
     /// Busy flag state. This is *not* equivalent to `in_command()`, the busy flag goes down
     /// roughly 2000 cyles before the IRQ triggers.
     pub fn is_busy(&self) -> bool {
-        match self.sequence {
+        matches!(
+            self.sequence,
             ControllerSequence::CommandPending
-            | ControllerSequence::ParamPush
-            | ControllerSequence::Execution
-            | ControllerSequence::RxFlush
-            | ControllerSequence::RxPush
-            | ControllerSequence::BusyDelay => true,
-            _ => false,
-        }
+                | ControllerSequence::ParamPush
+                | ControllerSequence::Execution
+                | ControllerSequence::RxFlush
+                | ControllerSequence::RxPush
+                | ControllerSequence::BusyDelay
+        )
     }
 
     pub fn get_async_response(&self) -> Option<(CycleCount, AsyncResponse)> {
@@ -349,7 +349,7 @@ impl Controller {
             //
             // TODO: figure out if there's really a "standby" state different from "paused".
             t += 2_475_904 >> (self.double_speed as u32)
-        } else if off >= 3 && off < 12 {
+        } else if (3..12).contains(&off) {
             t += self.cycles_per_sector() << 2;
         }
 
@@ -381,7 +381,7 @@ impl Controller {
         };
 
         self.sector = match sector {
-            Ok(s) => s,
+            Ok(s) => s.clone(),
             Err(e) => unimplemented!("Couldn't read sector {}: {}", position, e),
         };
     }
@@ -852,10 +852,7 @@ impl Controller {
                 let toc = image.toc();
                 let tracks = toc.tracks();
 
-                match tracks.iter().find(|t| t.track == track) {
-                    Some(t) => Some(t.start),
-                    None => None,
-                }
+                tracks.iter().find(|t| t.track == track).map(|t| t.start)
             }
             None => None,
         }

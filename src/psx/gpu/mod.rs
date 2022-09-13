@@ -845,11 +845,7 @@ enum State {
 
 impl State {
     fn is_idle(&self) -> bool {
-        if let State::Idle = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, State::Idle)
     }
 }
 

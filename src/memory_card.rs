@@ -109,13 +109,7 @@ impl MemoryCardFile {
             self.last_write_counter = new_write_counter;
         } else {
             // No write since last time
-            self.write_pending_since = match self.write_pending_since {
-                // No write is pending, no new write: we have nothing to do
-                None => None,
-                // We have a write pending, increment the counter to keep track of how long ago the
-                // last write was
-                Some(n) => Some(n + 1),
-            };
+            self.write_pending_since = self.write_pending_since.map(|n| n + 1);
         }
 
         // XXX this algorithm has one potential weakness: if some game writes *continuously* to the

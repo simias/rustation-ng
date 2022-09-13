@@ -1,6 +1,6 @@
 mod db;
 
-use crate::error::{Error, Result};
+use crate::error::{PsxError, Result};
 pub use db::Metadata;
 
 pub struct Bios {
@@ -17,7 +17,7 @@ impl Bios {
                 rom: binary,
                 metadata,
             }),
-            None => Err(Error::UnknownBios),
+            None => Err(PsxError::UnknownBios),
         }
     }
 

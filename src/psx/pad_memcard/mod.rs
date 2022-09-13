@@ -566,11 +566,7 @@ pub enum DsrState {
 
 impl DsrState {
     fn is_active(&self) -> bool {
-        if let DsrState::Active(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, DsrState::Active(_))
     }
 
     fn delay_by(&self, offset: CycleCount) -> DsrState {

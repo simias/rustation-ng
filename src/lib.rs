@@ -33,6 +33,7 @@ extern crate log;
 extern crate cdimage;
 extern crate fnv;
 extern crate shaman;
+extern crate thiserror;
 
 mod assembler;
 mod error;
@@ -47,7 +48,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use error::{Error, Result};
+use error::{PsxError, Result};
 use memory_card::MemoryCardFile;
 use psx::bios::Metadata;
 use psx::bios::{Bios, BIOS_SIZE};
@@ -328,20 +329,19 @@ impl Context {
 
         let w;
         let h;
-        let aspect_ratio;
 
-        if full_vram {
+        let aspect_ratio = if full_vram {
             w = 1024;
             h = 512;
-            aspect_ratio = 2. / 1.
+            2. / 1.
         } else {
             // Maximum resolution supported by the PlayStation video output is 640x576. That high a
             // vertical resolution would mean no blanking however, so it doesn't make a lot of
             // sense.
             w = 640;
             h = 480;
-            aspect_ratio = 4. / 3.
-        }
+            4. / 3.
+        };
 
         let max_width = (w * upscaling) as libc::c_uint;
         let max_height = (h * upscaling) as libc::c_uint;
@@ -526,7 +526,7 @@ where
         // Maybe "."? I'd rather give an explicit error message instead.
         None => {
             let m = "The frontend didn't give us a system directory, no BIOS can be loaded";
-            return Err(Error::FrontendError(m.to_string()));
+            return Err(PsxError::FrontendError(m.to_string()));
         }
     };
 
@@ -566,7 +566,7 @@ where
 
     error!("Couldn't find a suitable BIOS image");
 
-    Err(Error::NoBiosFound)
+    Err(PsxError::NoBiosFound)
 }
 
 /// Attempt to read and load the BIOS at `path`
@@ -588,10 +588,10 @@ where
 
     if md.known_bad {
         let m = format!("{:?}: known bad dump", path);
-        Err(Error::BadBios(m))
+        Err(PsxError::BadBios(m))
     } else if !predicate(md) {
         let m = format!("{:?}: rejected by predicate", path);
-        Err(Error::BadBios(m))
+        Err(PsxError::BadBios(m))
     } else {
         Ok(bios)
     }

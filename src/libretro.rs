@@ -14,6 +14,7 @@ use std::marker::Sync;
 use std::path::PathBuf;
 use std::ptr;
 
+#[allow(clippy::result_unit_err)]
 pub trait Context {
     /// Get the system's audio and video parameters
     fn get_system_av_info(&self) -> SystemAvInfo;

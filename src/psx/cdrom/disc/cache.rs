@@ -4,7 +4,7 @@
 
 use cdimage::msf::Msf;
 use cdimage::sector::Sector;
-use cdimage::{CdResult, Image, Toc};
+use cdimage::{Image, Toc};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
@@ -14,15 +14,12 @@ pub struct Cache {
     reader: Arc<(Mutex<Reader>, Condvar)>,
     /// Thread handle for the prefetcher
     handle: Option<thread::JoinHandle<()>>,
-    /// Name of our format
-    format: String,
     /// CD table of contents
     toc: Toc,
 }
 
 impl Cache {
     pub fn new(image: Box<dyn Image + Send>) -> Cache {
-        let format = format!("cache + {}", image.image_format());
         let toc = image.toc().clone();
 
         let reader = Arc::new((Mutex::new(Reader::new()), Condvar::new()));
@@ -42,7 +39,6 @@ impl Cache {
         let mut cache = Cache {
             reader,
             handle: Some(handle),
-            format,
             toc,
         };
 
@@ -72,31 +68,8 @@ impl Cache {
             }
         }
     }
-}
 
-impl ::std::ops::Drop for Cache {
-    fn drop(&mut self) {
-        {
-            let (mut reader, cond) = self.reader();
-
-            // Tell the prefetcher to quit
-            reader.quit = true;
-            cond.notify_one();
-        }
-
-        if let Some(t) = self.handle.take() {
-            t.join().unwrap();
-        }
-    }
-}
-
-/// Make the cache itself behave like an image format
-impl Image for Cache {
-    fn image_format(&self) -> String {
-        self.format.clone()
-    }
-
-    fn read_sector(&mut self, msf: Msf) -> CdResult<Sector> {
+    pub fn read_sector(&mut self, msf: Msf) -> CachedResult<Sector> {
         let (mut reader, cond) = self.reader();
 
         loop {
@@ -116,12 +89,31 @@ impl Image for Cache {
         }
     }
 
-    fn toc(&self) -> &Toc {
+    pub fn toc(&self) -> &Toc {
         &self.toc
     }
 }
 
-type SectorCache = fnv::FnvHashMap<Msf, CdResult<Sector>>;
+impl ::std::ops::Drop for Cache {
+    fn drop(&mut self) {
+        {
+            let (mut reader, cond) = self.reader();
+
+            // Tell the prefetcher to quit
+            reader.quit = true;
+            cond.notify_one();
+        }
+
+        if let Some(t) = self.handle.take() {
+            t.join().unwrap();
+        }
+    }
+}
+
+/// We need to store the error in an Arc because it can't be cloned
+pub type CachedResult<R> = std::result::Result<R, Arc<cdimage::CdError>>;
+
+type SectorCache = fnv::FnvHashMap<Msf, CachedResult<Sector>>;
 
 /// The shared state between the main thread and the prefetcher
 struct Reader {
@@ -183,7 +175,10 @@ fn run_prefetcher(mut image: Box<dyn Image>, reader: Arc<(Mutex<Reader>, Condvar
         // tries to access an already-cached sector
         ::std::mem::drop(reader);
 
-        let sector = image.read_sector(fetch_msf);
+        let sector = match image.read_sector(fetch_msf) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(Arc::new(e)),
+        };
 
         // Re-lock the reader
         reader = reader_mutex.lock().unwrap();

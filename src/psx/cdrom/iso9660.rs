@@ -1,8 +1,11 @@
 //! Very partial implementation of the ISO 9660 filesystem
 
+use super::disc::CdCache;
 use cdimage::bcd::Bcd;
 use cdimage::msf::Msf;
-use cdimage::{CdError, Image};
+use cdimage::CdError;
+use std::sync::Arc;
+use thiserror::Error;
 
 /// Structure representing an ISO9660 directory
 pub struct Directory {
@@ -11,9 +14,9 @@ pub struct Directory {
 }
 
 impl Directory {
-    pub fn new(image: &mut dyn Image, entry: &Entry) -> Result<Directory, Error> {
+    pub fn new(image: &mut CdCache, entry: &Entry) -> Result<Directory, IsoError> {
         if !entry.is_dir() {
-            return Err(Error::NotADirectory);
+            return Err(IsoError::NotADirectory);
         }
 
         let mut dir = Directory {
@@ -26,7 +29,7 @@ impl Directory {
 
         let track_msf = match Msf::from_sector_index(extent_location) {
             Some(m) => m,
-            None => return Err(Error::BadExtent(extent_location)),
+            None => return Err(IsoError::BadExtent(extent_location)),
         };
 
         let toc = image.toc();
@@ -49,7 +52,7 @@ impl Directory {
         Ok(dir)
     }
 
-    fn parse_entries(&mut self, mut raw: &[u8]) -> Result<(), Error> {
+    fn parse_entries(&mut self, mut raw: &[u8]) -> Result<(), IsoError> {
         while !raw.is_empty() {
             let dir_len = raw[0] as usize;
 
@@ -62,8 +65,7 @@ impl Directory {
             }
 
             if dir_len < 34 {
-                let desc = format!("Directory entry too short ({})", dir_len);
-                return Err(Error::BadFormat(desc));
+                return Err(IsoError::InvalidDirectoryEntryLen(dir_len));
             }
 
             let name_len = raw[32] as usize;
@@ -71,7 +73,7 @@ impl Directory {
             let name_end = 33 + name_len;
 
             if name_end > dir_len {
-                return Err(Error::BadFormat("Entry name too long".into()));
+                return Err(IsoError::EntryNameTooLong);
             }
 
             self.entries.push(Entry::new(&raw[0..dir_len]));
@@ -85,18 +87,18 @@ impl Directory {
     /// Attempt to "cd" to a subdirectory, returning a new `Directory`
     /// instance
     #[allow(dead_code)]
-    pub fn cd(&self, image: &mut dyn Image, name: &[u8]) -> Result<Directory, Error> {
+    pub fn cd(&self, image: &mut CdCache, name: &[u8]) -> Result<Directory, IsoError> {
         let entry = self.entry_by_name(name)?;
 
         Directory::new(image, entry)
     }
 
-    pub fn entry_by_name(&self, name: &[u8]) -> Result<&Entry, Error> {
+    pub fn entry_by_name(&self, name: &[u8]) -> Result<&Entry, IsoError> {
         match self.entries.iter().find(|e| e.name() == name) {
             Some(e) => Ok(e),
             None => {
                 let n = String::from_utf8_lossy(name);
-                Err(Error::EntryNotFound(n.to_string()))
+                Err(IsoError::EntryNotFound(n.to_string()))
             }
         }
     }
@@ -140,9 +142,9 @@ impl Entry {
         read_u32(&self.0[10..18])
     }
 
-    pub fn read_file(&self, image: &mut dyn Image) -> Result<Vec<u8>, Error> {
+    pub fn read_file(&self, image: &mut CdCache) -> Result<Vec<u8>, IsoError> {
         if self.is_dir() {
-            return Err(Error::NotAFile);
+            return Err(IsoError::NotAFile);
         }
 
         let mut extent_len = self.extent_len() as usize;
@@ -152,7 +154,7 @@ impl Entry {
 
         let track_msf = match Msf::from_sector_index(extent_location) {
             Some(m) => m,
-            None => return Err(Error::BadExtent(extent_location)),
+            None => return Err(IsoError::BadExtent(extent_location)),
         };
 
         let toc = image.toc();
@@ -178,35 +180,33 @@ impl Entry {
     }
 }
 
-#[derive(Debug)]
-pub enum Error {
-    /// Cdimage access error
-    CdError(CdError),
-    /// Couldn't find the ISO9660 magic "CD0001"
+#[derive(Error, Debug)]
+pub enum IsoError {
+    #[error("Cdimage access error")]
+    CdError(#[from] CdError),
+    #[error("Cdimage access error")]
+    CachedCdError(#[from] Arc<CdError>),
+    #[error("Couldn't find the ISO9660 magic `CD0001`")]
     BadMagic,
-    /// Couldn't find the Primary Volume Descriptor
+    #[error("Couldn't find the Primary Volume Descriptor")]
     MissingPrimaryVolumeDescriptor,
-    /// Unexpected Volume Descriptor version
+    #[error("Unexpected Volume Descriptor version")]
     BadVolumDescriptorVersion,
-    /// Encountered an invalid extent location
+    #[error("Encountered an invalid extent location")]
     BadExtent(u32),
-    /// Miscellaneous ISO9660 format error containing a description of the problem
-    BadFormat(String),
-    /// The requested entry couldn't be found
+    #[error("ISO9660 directory entry is too short ({0}B)")]
+    InvalidDirectoryEntryLen(usize),
+    #[error("ISO9660 entry name is longer than the directory")]
+    EntryNameTooLong,
+    #[error("The requested entry `{0}` couldn't be found")]
     EntryNotFound(String),
-    /// We expected a directory and got a file
+    #[error("We expected a directory and got a file")]
     NotADirectory,
-    /// We expected a file and got a directory
+    #[error("We expected a file and got a directory")]
     NotAFile,
 }
 
-impl From<CdError> for Error {
-    fn from(e: CdError) -> Error {
-        Error::CdError(e)
-    }
-}
-
-pub fn open_image(image: &mut dyn Image) -> Result<Directory, Error> {
+pub fn open_image(image: &mut CdCache) -> Result<Directory, IsoError> {
     // The first 16 sectors are the "system area" which is ignored by the ISO filesystem. The
     // Volume Descriptor Set should start at 00:00:16 in track 01
     let toc = image.toc();
@@ -223,7 +223,7 @@ pub fn open_image(image: &mut dyn Image) -> Result<Directory, Error> {
 
         // Check volume descriptor "standard identifier"
         if &volume_descriptor[1..6] != b"CD001" {
-            return Err(Error::BadMagic);
+            return Err(IsoError::BadMagic);
         }
 
         // Byte 0 contains the "volume descriptor type".
@@ -231,7 +231,7 @@ pub fn open_image(image: &mut dyn Image) -> Result<Directory, Error> {
             // Primary Volume Descriptor
             0x01 => break,
             // Volume Descriptor Set Terminator
-            0xff => return Err(Error::MissingPrimaryVolumeDescriptor),
+            0xff => return Err(IsoError::MissingPrimaryVolumeDescriptor),
             // Unhandled volume descriptor type, ignore
             _ => (),
         }
@@ -244,7 +244,7 @@ pub fn open_image(image: &mut dyn Image) -> Result<Directory, Error> {
 
     // Volume Descriptor Version
     if volume_descriptor[6] != 0x01 {
-        return Err(Error::BadVolumDescriptorVersion);
+        return Err(IsoError::BadVolumDescriptorVersion);
     }
 
     // We can now open the root directory descriptor

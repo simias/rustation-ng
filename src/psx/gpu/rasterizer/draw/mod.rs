@@ -559,8 +559,8 @@ impl Rasterizer {
     }
 
     fn read_pixel(&self, x: i32, y: i32) -> Pixel {
-        debug_assert!(x >= 0 && x < 1024, "x out of bounds ({})", x);
-        debug_assert!(y >= 0 && y < 1024, "y out of bounds ({})", y);
+        debug_assert!((0..1024).contains(&x), "x out of bounds ({})", x);
+        debug_assert!((0..1024).contains(&y), "y out of bounds ({})", y);
 
         let y = y & 0x1ff;
         let vram_off = y * 1024 + x;
@@ -573,8 +573,8 @@ impl Rasterizer {
         Transparency: TransparencyMode,
         Texture: TextureMode,
     {
-        debug_assert!(x >= 0 && x < 1024, "x out of bounds ({})", x);
-        debug_assert!(y >= 0 && y < 1024, "y out of bounds ({})", y);
+        debug_assert!((0..1024).contains(&x), "x out of bounds ({})", x);
+        debug_assert!((0..1024).contains(&y), "y out of bounds ({})", y);
 
         // Apparently the PlayStation GPU supports 2MB VRAM (1024x1024, used in some arcade
         // machines apparently) but the bottom half isn't installed so it wraps around.
@@ -2166,7 +2166,6 @@ where
 struct VRamStore {
     x_min: u16,
     x_max: u16,
-    y_min: u16,
     y_max: u16,
     /// Current X coordinate, from x_min to x_max
     x: u16,
@@ -2182,7 +2181,6 @@ impl VRamStore {
         VRamStore {
             x_min: left,
             x_max: left + width,
-            y_min: top,
             y_max: top + height,
             x: left,
             y: top,
