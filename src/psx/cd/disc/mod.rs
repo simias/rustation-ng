@@ -1,14 +1,13 @@
 use std::fmt;
 
-use cdimage::bcd::Bcd;
-use cdimage::msf::Msf;
-use cdimage::Image;
+use cdimage::{Bcd, DiscPosition, Image, Msf, Sector};
 
 use super::iso9660;
 use crate::error::{PsxError, Result};
 use crate::psx::gpu::VideoStandard;
 
 pub use cache::Cache as CdCache;
+use cache::CachedResult;
 
 mod cache;
 
@@ -33,6 +32,10 @@ impl Disc {
         let disc = Disc { cache, serial };
 
         Ok(disc)
+    }
+
+    pub fn read_sector(&mut self, dp: DiscPosition) -> CachedResult<Sector> {
+        self.cache.read_sector(dp)
     }
 
     pub fn region(&self) -> Region {
@@ -141,8 +144,8 @@ pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
     // In order to identify the type of disc we're going to use sector 00:00:04 from Track01 which
     // should contain the "Licensed by..."  string.
     let toc = image.toc();
-    let track = toc.track(Bcd::one())?;
-    let msf = track.absolute_msf(Msf::from_bcd(0, 0, 4).unwrap())?;
+    let track = toc.track(Bcd::ONE)?;
+    let msf = track.disc_position(Msf::from_bcd(0x00, 0x00, 0x04).unwrap())?;
 
     let sector = image.read_sector(msf)?;
 

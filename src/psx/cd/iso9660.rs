@@ -33,11 +33,11 @@ impl Directory {
         };
 
         let toc = image.toc();
-        let track = toc.track(Bcd::one())?;
-        let mut msf = track.absolute_msf(track_msf)?;
+        let track = toc.track(Bcd::ONE)?;
+        let mut dp = track.disc_position(track_msf)?;
 
         while extent_len > 0 {
-            let sector = image.read_sector(msf)?;
+            let sector = image.read_sector(dp)?;
 
             let data = sector.mode2_xa_payload()?;
 
@@ -46,7 +46,7 @@ impl Directory {
             dir.parse_entries(&data[0..len])?;
 
             extent_len -= len;
-            msf = msf.next().unwrap();
+            dp = dp.next().unwrap();
         }
 
         Ok(dir)
@@ -158,11 +158,11 @@ impl Entry {
         };
 
         let toc = image.toc();
-        let track = toc.track(Bcd::one())?;
-        let mut msf = track.absolute_msf(track_msf)?;
+        let track = toc.track(Bcd::ONE)?;
+        let mut dp = track.disc_position(track_msf)?;
 
         while extent_len > 0 {
-            let sector = image.read_sector(msf)?;
+            let sector = image.read_sector(dp)?;
 
             let data = sector.mode2_xa_payload()?;
 
@@ -173,7 +173,7 @@ impl Entry {
             }
 
             extent_len -= len;
-            msf = msf.next().unwrap();
+            dp = dp.next().unwrap();
         }
 
         Ok(contents)
@@ -210,14 +210,14 @@ pub fn open_image(image: &mut CdCache) -> Result<Directory, IsoError> {
     // The first 16 sectors are the "system area" which is ignored by the ISO filesystem. The
     // Volume Descriptor Set should start at 00:00:16 in track 01
     let toc = image.toc();
-    let track = toc.track(Bcd::one())?;
-    let mut msf = track.absolute_msf(Msf::from_bcd(0, 0, 0x16).unwrap())?;
+    let track = toc.track(Bcd::ONE)?;
+    let mut dp = track.disc_position(Msf::from_bcd(0, 0, 0x16).unwrap())?;
 
     let mut sector;
 
     // Look for the primary volume descriptor
     loop {
-        sector = image.read_sector(msf)?;
+        sector = image.read_sector(dp)?;
 
         let volume_descriptor = sector.mode2_xa_payload()?;
 
@@ -237,7 +237,7 @@ pub fn open_image(image: &mut CdCache) -> Result<Directory, IsoError> {
         }
 
         // Not the primary volume descriptor, move on to the next sector
-        msf = msf.next().unwrap();
+        dp = dp.next().unwrap();
     }
 
     let volume_descriptor = sector.mode2_xa_payload()?;

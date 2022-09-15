@@ -3,7 +3,7 @@
 #[macro_use]
 mod box_array;
 pub mod bios;
-mod cdrom;
+mod cd;
 pub mod cop0;
 pub mod cpu;
 pub mod debugger;
@@ -22,7 +22,7 @@ use std::cmp::min;
 
 use crate::error::Result;
 
-pub use cdrom::{disc, iso9660};
+pub use cd::{disc, iso9660, CDC_ROM_SHA256, CDC_ROM_SIZE};
 pub use gpu::{Frame, VideoStandard};
 
 /// Type alias used to represent a number of clock cycles
@@ -48,7 +48,7 @@ pub struct Psx {
     timers: timers::Timers,
     pub gpu: gpu::Gpu,
     mdec: mdec::MDec,
-    cdrom: cdrom::CdRom,
+    cd: cd::CdInterface,
     pub pad_memcard: pad_memcard::PadMemCard,
     /// Memory control registers
     mem_control: [u32; 9],
@@ -64,22 +64,29 @@ pub struct Psx {
 }
 
 impl Psx {
-    pub fn new_with_disc(disc: disc::Disc, bios: bios::Bios) -> Result<Psx> {
+    pub fn new_with_disc(
+        disc: disc::Disc,
+        bios: bios::Bios,
+        cdc_firmware: [u8; cd::CDC_ROM_SIZE],
+    ) -> Result<Psx> {
         let standard = disc.region().video_standard();
 
-        Ok(Psx::new_with_bios(Some(disc), bios, standard))
+        Psx::new_with_bios(Some(disc), bios, standard, cdc_firmware)
     }
 
     pub fn new_with_bios(
         disc: Option<disc::Disc>,
         bios: bios::Bios,
         standard: gpu::VideoStandard,
-    ) -> Psx {
+        cdc_firmware: [u8; cd::CDC_ROM_SIZE],
+    ) -> Result<Psx> {
         let mut xmem = xmem::XMemory::new();
 
         xmem.set_bios(bios.get_rom());
 
-        Psx {
+        let cd = cd::CdInterface::new(disc, cdc_firmware)?;
+
+        Ok(Psx {
             cycle_counter: 0,
             frame_done: false,
             sync: sync::Synchronizer::new(),
@@ -94,14 +101,14 @@ impl Psx {
             timers: timers::Timers::new(),
             gpu: gpu::Gpu::new(standard),
             mdec: mdec::MDec::new(),
-            cdrom: cdrom::CdRom::new(disc),
+            cd,
             pad_memcard: pad_memcard::PadMemCard::new(),
             mem_control: [0; 9],
             ram_size: 0,
             cache_control: 0,
             dma_timing_penalty: 0,
             cpu_stalled_for_dma: false,
-        }
+        })
     }
 
     pub fn video_standard(&self) -> VideoStandard {
@@ -228,7 +235,7 @@ impl Psx {
 
         if let Some(offset) = map::CDROM.contains(abs_addr) {
             self.tick(6 * T::width() as i32);
-            return cdrom::load(self, offset);
+            return cd::load(self, offset);
         }
 
         if let Some(off) = map::IRQ_CONTROL.contains(abs_addr) {
@@ -331,7 +338,7 @@ impl Psx {
         }
 
         if let Some(offset) = map::CDROM.contains(abs_addr) {
-            cdrom::store(self, offset, val);
+            cd::store(self, offset, val);
             return;
         }
 

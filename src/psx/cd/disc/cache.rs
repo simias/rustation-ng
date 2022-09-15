@@ -2,8 +2,8 @@
 //!
 //! This cache tries to read sectors ahead of the emulator to avoid any I/O lockup
 
-use cdimage::msf::Msf;
 use cdimage::sector::Sector;
+use cdimage::{DiscPosition, Msf};
 use cdimage::{Image, Toc};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -58,10 +58,10 @@ impl Cache {
         let toc = self.toc.clone();
         // Preload the first minute (assuming 1x) of each track
         for t in toc.tracks() {
-            for i in 0..(60 * 75) {
-                match t.absolute_msf(Msf::from_sector_index(i).unwrap()) {
-                    Ok(msf) => {
-                        let _ = self.read_sector(msf);
+            for msf in (0..(60 * 75)).map(|i| Msf::from_sector_index(i).unwrap()) {
+                match t.disc_position(msf) {
+                    Ok(dp) => {
+                        let _ = self.read_sector(dp);
                     }
                     _ => break,
                 }
@@ -69,17 +69,17 @@ impl Cache {
         }
     }
 
-    pub fn read_sector(&mut self, msf: Msf) -> CachedResult<Sector> {
+    pub fn read_sector(&mut self, dp: DiscPosition) -> CachedResult<Sector> {
         let (mut reader, cond) = self.reader();
 
         loop {
             // Even if the sector is already in cache we want to notify the prefetcher of what
             // we're doing so that it can read-ahead if necessary
-            reader.prefetch_next = msf;
+            reader.prefetch_next = dp;
             reader.prefetch_remaining = PREFETCH_READAHEAD_SECTORS;
             cond.notify_one();
 
-            if let Some(s) = reader.sectors.get(&msf) {
+            if let Some(s) = reader.sectors.get(&dp) {
                 // Sector is in cache
                 return s.clone();
             }
@@ -113,7 +113,7 @@ impl ::std::ops::Drop for Cache {
 /// We need to store the error in an Arc because it can't be cloned
 pub type CachedResult<R> = std::result::Result<R, Arc<cdimage::CdError>>;
 
-type SectorCache = fnv::FnvHashMap<Msf, CachedResult<Sector>>;
+type SectorCache = fnv::FnvHashMap<DiscPosition, CachedResult<Sector>>;
 
 /// The shared state between the main thread and the prefetcher
 struct Reader {
@@ -122,7 +122,7 @@ struct Reader {
     /// Number of sectors left to prefetch before becoming idle
     prefetch_remaining: u32,
     /// Next sector we should attempt to prefetch (if `prefetch_remaining` is > 0).
-    prefetch_next: Msf,
+    prefetch_next: DiscPosition,
     /// Set to true when the prefetcher should quit
     quit: bool,
 }
@@ -132,7 +132,7 @@ impl Reader {
         Reader {
             sectors: SectorCache::with_capacity_and_hasher(CACHE_CAPACITY, Default::default()),
             prefetch_remaining: 0,
-            prefetch_next: Msf::zero(),
+            prefetch_next: DiscPosition::INNERMOST,
             quit: false,
         }
     }

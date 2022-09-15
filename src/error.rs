@@ -25,4 +25,8 @@ pub enum PsxError {
     BadDiscFormat(String),
     #[error("CD ISO filesystem error: `{0}`")]
     IsoError(#[from] iso9660::IsoError),
+    #[error("Invalid or unknown CDC firmware")]
+    BadCdcFirmware,
+    #[error("We couldn't find a suitable CDC firmware image")]
+    NoCdcFirmwareFound,
 }

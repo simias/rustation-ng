@@ -1,7 +1,7 @@
 //! The PlayStation DMA, that can be used to copy data between the RAM and various devices (GPU,
 //! CD drive, MDEC, SPU etc...)
 
-use super::{cdrom, gpu, irq, mdec, spu, sync, Addressable, CycleCount, Psx};
+use super::{cd, gpu, irq, mdec, spu, sync, Addressable, CycleCount, Psx};
 use irq::IrqState;
 use std::ops::{Index, IndexMut};
 
@@ -445,7 +445,7 @@ fn port_load(psx: &mut Psx, port: Port) -> (u32, u32, CycleCount) {
         // XXX latency taken from mednafen
         Port::CdRom => {
             delay = 8;
-            cdrom::dma_load(psx)
+            cd::dma_load(psx)
         }
         Port::Spu => spu::dma_load(psx),
         Port::MDecOut => {

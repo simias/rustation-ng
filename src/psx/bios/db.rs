@@ -7,7 +7,7 @@ use shaman::sha2::Sha256;
 
 use crate::assembler::syntax::*;
 use crate::assembler::Assembler;
-use crate::psx::cdrom::disc::Region;
+use crate::psx::cd::disc::Region;
 
 use super::{Bios, BIOS_SIZE};
 

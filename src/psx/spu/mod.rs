@@ -5,7 +5,7 @@
 mod fifo;
 mod fir;
 
-use super::{cdrom, cpu, irq, sync, AccessWidth, Addressable, CycleCount, Psx};
+use super::{cd, cpu, irq, sync, AccessWidth, Addressable, CycleCount, Psx};
 use fifo::DecoderFifo;
 use std::ops::{Index, IndexMut};
 
@@ -301,12 +301,12 @@ fn run_cycle(psx: &mut Psx) {
     }
 
     if psx.spu.cd_audio_enabled() {
-        let (cd_left, cd_right) = cdrom::run_audio_cycle(psx, true);
+        let (cd_left, cd_right) = cd::run_audio_cycle(psx, cd::CycleMode::Audio);
 
         left_mix += i32::from(cd_left);
         right_mix += i32::from(cd_right);
     } else {
-        cdrom::run_audio_cycle(psx, false);
+        cd::run_audio_cycle(psx, cd::CycleMode::Muted);
     }
 
     left_mix = saturate_to_i16(left_mix) as i32;
