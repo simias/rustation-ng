@@ -39,9 +39,11 @@ impl CdInterface {
             unimplemented!("Patch CDC firmware for {:?}", region);
         }
 
-        Ok(CdInterface {
-            cdc: cdc::Cdc::new(&cdc_rom, disc),
-        })
+        let mut cdc = cdc::Cdc::new(&cdc_rom, disc);
+
+        cdc.set_shell_open(false);
+
+        Ok(CdInterface { cdc })
     }
 }
 

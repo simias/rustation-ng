@@ -1,5 +1,5 @@
 use super::{us_to_audio_cycles, Cdc};
-use cdimage::DiscPosition;
+use cdimage::{DiscPosition, Msf};
 use std::cmp::min;
 
 /// CXD2545Q: DSP with built-in digital servo
@@ -268,6 +268,28 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
     handle_scex(cdc);
 }
 
+fn set_position(cdc: &mut Cdc, new_pos: DiscPosition) {
+    cdc.dsp.position = new_pos;
+
+    // Update LMSW state
+    let lmsw = match cdc.dsp.position {
+        DiscPosition::Program(_) => true,
+        DiscPosition::LeadIn(msf) => {
+            // With Metal Gear Solid disc 1 I read the first lead-in sector at 98:53:49 the LMSW
+            // signal goes high at around 99:29:47 in the lead-in (with some bouncing for ~5
+            // sectors). That means that the signal remains low for ~2700 sectors from the start of
+            // the lead-in.
+            //
+            // Obviously the exact position will vary depending on the drive and on the disc
+            let limit = Msf::from_bcd(0x99, 0x29, 0x47).unwrap();
+
+            msf > limit
+        }
+    };
+
+    cdc.uc.set_lmsw(lmsw);
+}
+
 fn check_sector_read(cdc: &mut Cdc) {
     if let Some(next) = cdc.dsp.next_sector {
         if next > 1 {
@@ -353,9 +375,8 @@ fn read_sector(cdc: &mut Cdc) {
 
     cdc.dsp_sector_read();
 
-    cdc.dsp.position = cdc.dsp.position.next().expect("Reached max position");
-
-    // XXX update LMSW
+    let new_pos = cdc.dsp.position.next().expect("Reached max position");
+    set_position(cdc, new_pos);
 }
 
 fn handle_scex(cdc: &mut Cdc) {

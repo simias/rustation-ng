@@ -70,10 +70,6 @@ impl Uc {
         // read 1.
         port_b_input |= 1 | (1 << 6);
 
-        // Pin 2 is LMTSW which is a contact that drives 0 when the sled is all the way to the
-        // center of the disc.
-        port_b_input |= 0 << 2;
-
         // If pin 5 is low we boot in test mode, let's not do that
         //
         // XXX on the 5502 this seems to be something else, but it's also not connected
@@ -151,6 +147,20 @@ impl Uc {
             self.io_ports[1].input |= 1 << 3;
         } else {
             self.io_ports[1].input &= !(1 << 3);
+        }
+    }
+
+    /// Set the state of the lmsw input that's connected to a switch at the inner limit of the CD
+    /// sled. The input is low when the sled is all the way to the start of the disc, otherwise
+    /// it's high.
+    ///
+    /// It's used by the firmware to reset the sled before attempting the focus sequence.
+    pub fn set_lmsw(&mut self, set: bool) {
+        // Pin 3 is "DOOR", set to 1 when the door is opened
+        if set {
+            self.io_ports[1].input |= 1 << 2;
+        } else {
+            self.io_ports[1].input &= !(1 << 2);
         }
     }
 
@@ -580,7 +590,7 @@ fn run_next_instruction(cdc: &mut Cdc) -> u8 {
     }
 
     if cdc.uc.debug {
-        debug!("{:?}", cdc.uc);
+        println!("{:?}", cdc.uc);
     }
 
     let op = cdc.uc.pc_next();
