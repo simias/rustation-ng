@@ -11,7 +11,7 @@ checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 [[package]]
 name = "cdimage"
 version = "0.1.0"
-source = "git+https://github.com/simias/cdimage?branch=master#802f2430810ef515e872896c0896edb1b70d6cb4"
+source = "git+https://github.com/simias/cdimage?branch=master#dd170d53f1334db7c6be994d8ada1e2402906b85"
 dependencies = [
  "arrayref",
  "thiserror",

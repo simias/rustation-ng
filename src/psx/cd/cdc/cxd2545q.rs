@@ -69,6 +69,10 @@ pub struct Dsp {
 
 impl Dsp {
     pub fn new() -> Dsp {
+        // In my tests it seems that my PlayStation starts reading the lead-in roughly one minute
+        // before we reach the program area
+        let position = "<99:00:00".parse().expect("Bad starting position");
+
         let mut dsp = Dsp {
             state: State::Idle,
             command_sr: 0,
@@ -95,7 +99,7 @@ impl Dsp {
             track_jump_count: 0x100,
             mode_setting: 0,
             sled_kick_level: 1,
-            position: DiscPosition::INNERMOST,
+            position,
         };
 
         dsp.build_scex_string();
@@ -881,8 +885,10 @@ fn auto_focus_finish(cdc: &mut Cdc) {
     };
 }
 
-fn jump_2n_finish(_cdc: &mut Cdc) {
-    todo!()
+fn jump_2n_finish(cdc: &mut Cdc) {
+    info!("Jump complete {}", cdc.dsp.position);
+    cdc.dsp.state = State::Idle;
+    update_sens(cdc)
 }
 
 /// Common to all track jumps
@@ -916,6 +922,8 @@ const TRACK_JUMP_DELAY_TO_XBUSY: [(u32, u32); 6] = [
     (1_000, us_to_audio_cycles(17_400)),
 ];
 
+/// Compute the time it will take for the drive to jump over `track_count` tracks. Here "track"
+/// means skipping over one rotation of the CD spiral, not one ToC track.
 fn jump_delay(track_count: u32) -> u32 {
     assert_ne!(track_count, 0, "Jump with 0 track count!");
     // For I use a simple algorithm: we find where the jump count lies within
@@ -967,15 +975,24 @@ fn track_jump_2n(cdc: &mut Cdc, dir: SledDirection) {
 
     let track_count = 2 * u32::from(cdc.dsp.track_jump_count);
 
-    info!("track jump {:?} {}", dir, track_count);
-
     if dir != SledDirection::Forward {
         todo!();
     }
 
-    let xbusy_delay = jump_delay(track_count);
+    let new_pos = cdc
+        .dsp
+        .position
+        .offset_turns(track_count as i32)
+        .expect("bad jump");
 
-    cdc.dsp.state = State::Jump2N(xbusy_delay)
+    info!(
+        "track jump {:?} {} ({} -> {})",
+        dir, track_count, cdc.dsp.position, new_pos
+    );
+
+    let xbusy_delay = jump_delay(track_count);
+    cdc.dsp.state = State::Jump2N(xbusy_delay);
+    set_position(cdc, new_pos);
 }
 
 /// Update the value output from the SENS pin depending on the current value of the serial shift
