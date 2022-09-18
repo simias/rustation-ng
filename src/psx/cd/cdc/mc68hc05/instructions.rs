@@ -857,6 +857,17 @@ impl AddressingMode for Dir {
     }
 }
 
+/// Indexed, no offset: X
+struct Ix;
+
+impl AddressingMode for Ix {
+    fn get_addr(cdc: &mut Cdc) -> u16 {
+        let x = cdc.uc.x as u16;
+
+        x
+    }
+}
+
 /// Indexed, 8bit offset: X + imm8
 struct Ix1;
 
@@ -1907,69 +1918,68 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
     },
     // 0xf0
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sub::<Ix>,
+        cycles: 4,
+    },
+    Instruction {
+        handler: op_cmp::<Ix>,
+        cycles: 4,
     },
     Instruction {
         handler: unimplemented,
         cycles: 0,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_cpx::<Ix>,
+        cycles: 4,
+    },
+    Instruction {
+        handler: op_and::<Ix>,
+        cycles: 4,
     },
     Instruction {
         handler: unimplemented,
         cycles: 0,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_lda::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
-    },
-    Instruction {
-        handler: unimplemented,
-        cycles: 0,
-    },
-    Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sta::<Ix>,
+        cycles: 5,
     },
     // 0xf8
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_eor::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_adc::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_ora::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_add::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_jmp::<Ix>,
+        cycles: 3,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_jsr::<Ix>,
+        cycles: 6,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_ldx::<Ix>,
+        cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_stx::<Ix>,
+        cycles: 5,
     },
-    // 0x100
 ];
