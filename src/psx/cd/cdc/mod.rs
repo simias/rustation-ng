@@ -15,13 +15,24 @@ pub struct Cdc {
 
 impl Cdc {
     pub fn new(mc68hc05_rom: &[u8; MC68HC05_ROM_DUMP_SIZE], disc: Option<Disc>) -> Cdc {
-        Cdc {
+        let mut cdc = Cdc {
             uc: mc68hc05::Uc::new(mc68hc05_rom),
             decoder: cxd1815q::Decoder::new(),
             dsp: cxd2545q::Dsp::new(),
             date: 0,
             disc,
-        }
+        };
+
+        // I start with the sled at some location on the disc to simulate the case where the
+        // console was shutdown mid-game.
+        //
+        // In practice it's irrelevant: the first thing the firmware should do is bring the sled
+        // back to the center (polling LMSW) but this way I make sure that this is emulated
+        // correctly and we won't freeze or crash if a game decides to reset the drive later.
+        let position = "+05:00:00".parse().expect("Bad starting position");
+        cxd2545q::set_position(&mut cdc, position);
+
+        cdc
     }
 
     fn disc_present(&self) -> bool {

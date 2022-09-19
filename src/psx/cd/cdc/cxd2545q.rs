@@ -69,10 +69,6 @@ pub struct Dsp {
 
 impl Dsp {
     pub fn new() -> Dsp {
-        // In my tests it seems that my PlayStation starts reading the lead-in roughly one minute
-        // before we reach the program area
-        let position = "<99:00:00".parse().expect("Bad starting position");
-
         let mut dsp = Dsp {
             state: State::Idle,
             command_sr: 0,
@@ -99,7 +95,7 @@ impl Dsp {
             track_jump_count: 0x100,
             mode_setting: 0,
             sled_kick_level: 1,
-            position,
+            position: DiscPosition::ZERO,
         };
 
         dsp.build_scex_string();
@@ -219,23 +215,29 @@ impl Dsp {
     fn sled_servo_enabled(&self) -> bool {
         self.tracking_mode & 3 != 0
     }
+
+    /// Returns true if the tracking mode is "Tracking servo OFF, Reverse sled move"
+    ///
+    /// That's the mode used by the firmware to bring the sled back to the lead-in (polling LMSW)
+    /// at the start.
+    fn is_sled_reversing(&self) -> bool {
+        self.tracking_mode & 0b1111 == 0b0011
+    }
 }
 
 pub fn run_audio_cycle(cdc: &mut Cdc) {
-    let mut dsp = &mut cdc.dsp;
-
-    if dsp.agok_xavebsy_delay > 0 {
-        dsp.agok_xavebsy_delay -= 1;
+    if cdc.dsp.agok_xavebsy_delay > 0 {
+        cdc.dsp.agok_xavebsy_delay -= 1;
     }
 
-    match dsp.state {
+    match cdc.dsp.state {
         State::Idle => (),
         State::BusyFrozen => (),
         State::BusyWait(ref mut ac) => {
             *ac -= 1;
 
             if *ac == 0 {
-                dsp.state = State::Idle;
+                cdc.dsp.state = State::Idle;
                 update_sens(cdc);
             }
         }
@@ -268,12 +270,39 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
         }
     }
 
+    if cdc.dsp.is_sled_reversing() {
+        // I don't want to bother implementing the full sled mechanics so I just special case this
+        // one: in this mode the sled is reversing towards the center of the disc, usually used
+        // early in the boot sequence to bring the sled back into the lead-in
+        //
+        // I roughly measured the speed of the sled in this mode at about 35mm/s. That's about half
+        // a track every audio cycle. Of course in practice the speed won't be fully linear, but
+        // it's probably a good enough approximation.
+        let turns = cdc.dsp.position.disc_turns().unwrap() - 0.5;
+
+        let new_pos = DiscPosition::from_turns(turns).unwrap();
+
+        set_position(cdc, new_pos);
+
+        // I assume that we'll lose the focus when running this, although I haven't checked.
+        cdc.dsp.focus_ok = false;
+    }
+
     check_sector_read(cdc);
     handle_scex(cdc);
 }
 
-fn set_position(cdc: &mut Cdc, new_pos: DiscPosition) {
+pub fn set_position(cdc: &mut Cdc, new_pos: DiscPosition) {
     cdc.dsp.position = new_pos;
+
+    // This represents how far into the lead-in the Playstation can get. This will vary depending
+    // on the CD and on the drive, but in my tests I seem to get about one full minute of lead-in
+    // (sometimes a little more)
+    let position_min = DiscPosition::LeadIn(Msf::from_bcd(0x99, 0x00, 0x00).unwrap());
+
+    if cdc.dsp.position < position_min {
+        cdc.dsp.position = position_min;
+    }
 
     // Update LMSW state
     let lmsw = match cdc.dsp.position {
@@ -384,8 +413,7 @@ fn read_sector(cdc: &mut Cdc) {
 }
 
 fn handle_scex(cdc: &mut Cdc) {
-    // XXX TODO
-    let in_lead_in = true;
+    let in_lead_in = cdc.dsp.position.in_lead_in();
 
     // In my tests the SCEx string was only received during the lead-in. In Rayman and Ridge
     // Racer Revolution it seems to stop almost immediately when we reach the track 01 prelude, in
