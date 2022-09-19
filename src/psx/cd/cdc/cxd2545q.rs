@@ -247,11 +247,11 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                 update_sens(cdc);
             }
         }
-        State::Jump2N(ref mut ac) => {
+        State::Jump(ref mut ac) => {
             *ac -= 1;
 
             if *ac == 0 {
-                jump_2n_finish(cdc);
+                jump_finish(cdc);
                 update_sens(cdc);
             }
         }
@@ -827,6 +827,8 @@ fn auto_sequence(cdc: &mut Cdc, command: u16) {
             }
         }
         0x7 => auto_focus_on(cdc),
+        0x8 => track_jump_1(cdc, SledDirection::Forward),
+        0x9 => track_jump_1(cdc, SledDirection::Reverse),
         0xc => track_jump_2n(cdc, SledDirection::Forward),
         0xd => track_jump_2n(cdc, SledDirection::Reverse),
         _ => unimplemented!("Auto command {:x}", sequence),
@@ -885,7 +887,7 @@ fn auto_focus_finish(cdc: &mut Cdc) {
     };
 }
 
-fn jump_2n_finish(cdc: &mut Cdc) {
+fn jump_finish(cdc: &mut Cdc) {
     info!("Jump complete {}", cdc.dsp.position);
     cdc.dsp.state = State::Idle;
     update_sens(cdc)
@@ -991,7 +993,42 @@ fn track_jump_2n(cdc: &mut Cdc, dir: SledDirection) {
     );
 
     let xbusy_delay = jump_delay(track_count);
-    cdc.dsp.state = State::Jump2N(xbusy_delay);
+    cdc.dsp.state = State::Jump(xbusy_delay);
+    set_position(cdc, new_pos);
+}
+
+fn track_jump_1(cdc: &mut Cdc, dir: SledDirection) {
+    track_jump_common(cdc);
+
+    let turns = match dir {
+        SledDirection::Forward => 1,
+        SledDirection::Reverse => -1,
+    };
+
+    let new_pos = cdc.dsp.position.offset_turns(turns).expect("bad jump");
+
+    // In my tests we end up 2 to 3 sectors after the theoretical sector one track away. That means
+    // for instance that when I do a track jump at the very start of the program area I'd expect to
+    // jump over ~9.8 sectors but I see +11 to +12 tracks while jumping ahead, -7/-8 when jumping
+    // backwards.
+    //
+    // I think it can be easily explained: for one thing we start jumping potentially in the middle
+    // of a track, and we probably end up in the middle of an other, so we need to wait for the
+    // drive to finish the partial sector, then wait for one complete sector to report a new SUBQ.
+    //
+    // For now I just offset by one, we'll see in practice if the firmware likes it. I prefer to
+    // unershoot than overshoot as a rule be cause if the firmware ends up just a little before the
+    // target it'll just wait to get there, if it's ahead it has no choice but to seek backwards
+    let new_pos = new_pos.next().unwrap();
+
+    // The delay varies between ~480us and ~650us with the bulk of the measurements between 500 and
+    // 650us. There don't appear to be timing differences between forward and backward jumps
+    let xbusy_delay = us_to_audio_cycles(550);
+
+    info!("track jump {} ({} -> {})", turns, cdc.dsp.position, new_pos);
+
+    cdc.dsp.state = State::Jump(xbusy_delay);
+
     set_position(cdc, new_pos);
 }
 
@@ -1092,8 +1129,8 @@ enum State {
     BusyWait(u32),
     /// Number of audio cycles until the focus sequence ends
     FocusOn(u32),
-    /// Number of audio cycles until the Jump2N sequence ends
-    Jump2N(u32),
+    /// Number of audio cycles until the Jump sequence ends
+    Jump(u32),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
