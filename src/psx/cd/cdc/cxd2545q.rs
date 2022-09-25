@@ -42,8 +42,6 @@ pub struct Dsp {
     subq_data_pos: u8,
     /// Current value output on SQSO when `soct_en` is false.
     subq_out: bool,
-    /// XXX hack
-    subq_idx: usize,
     /// Number of audio cycles until the next sector is read, or None if we're not currently
     /// reading
     next_sector: Option<u16>,
@@ -85,7 +83,6 @@ impl Dsp {
             soct_sr: 0,
             subq_data: [0; 12],
             subq_data_pos: 0,
-            subq_idx: 0,
             subq_out: false,
             next_sector: None,
             end_of_scor: None,
@@ -406,7 +403,7 @@ fn read_sector(cdc: &mut Cdc) {
         cdc.uc.set_dsp_subq(cdc.dsp.subq_out);
     }
 
-    cdc.dsp_sector_read();
+    cdc.dsp_sector_read(sector);
 
     let new_pos = cdc.dsp.position.next().expect("Reached max position");
     set_position(cdc, new_pos);

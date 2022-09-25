@@ -3,6 +3,7 @@ mod cxd2545q;
 mod mc68hc05;
 
 use super::Disc;
+use cdimage::Sector;
 pub use mc68hc05::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
 pub struct Cdc {
@@ -56,15 +57,6 @@ impl Cdc {
         }
     }
 
-    /// Advance emulation by the given number of seconds
-    pub fn run_seconds(&mut self, seconds: u32) {
-        for _ in 0..seconds {
-            for _ in 0..44100 {
-                self.run_audio_cycle();
-            }
-        }
-    }
-
     /// Writes coming from the host CPU (the main MIPS CPU)
     pub fn host_write(&mut self, addr: u8, v: u8) {
         cxd1815q::host_write(self, addr, v);
@@ -111,8 +103,8 @@ impl Cdc {
     }
 
     /// Called when the DSP reads a new sector
-    fn dsp_sector_read(&mut self) {
-        cxd1815q::dsp_sector_read(self);
+    fn dsp_sector_read(&mut self, sector: Sector) {
+        cxd1815q::dsp_sector_read(self, sector);
     }
 
     pub fn scan(mut self, mode: ScanMode) {

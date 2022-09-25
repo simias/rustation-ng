@@ -48,7 +48,7 @@ impl CdInterface {
 }
 
 /// Called by the DMA when it wants to get our CD data
-pub fn dma_load(psx: &mut Psx) -> u32 {
+pub fn dma_load(_psx: &mut Psx) -> u32 {
     todo!()
 }
 

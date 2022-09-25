@@ -27,6 +27,8 @@
 // Useless warning in rasterizer code
 #![allow(clippy::useless_let_if_seq)]
 
+#[macro_use]
+extern crate arrayref;
 extern crate libc;
 #[macro_use]
 extern crate log;
