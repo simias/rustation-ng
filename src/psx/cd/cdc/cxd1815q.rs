@@ -405,6 +405,14 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
         0x16 => {
             decoder.hintsts &= !7;
             decoder.hintsts |= val & 7;
+
+            if val & 7 != 0 {
+                debug!(
+                    "Triggering host IRQ {}, result: {:?}",
+                    val & 7,
+                    decoder.host_result
+                );
+            }
         }
         0x17 => decoder.push_result(val),
         _ => unimplemented!("sub CPU write 0x{:02x} @ 0x{:02x}", val, addr),
@@ -651,6 +659,8 @@ impl DecoderMode {
             //
             // I guess I could just probe the RAM lines while playing an audio CD...
             CdDa => true,
+            // Probably?
+            Disabled => false,
             _ => unimplemented!("{:?}", self),
         }
     }

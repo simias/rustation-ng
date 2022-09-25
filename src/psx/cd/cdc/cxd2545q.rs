@@ -1002,14 +1002,15 @@ fn track_jump_2n(cdc: &mut Cdc, dir: SledDirection) {
 
     let track_count = 2 * u32::from(cdc.dsp.track_jump_count);
 
-    if dir != SledDirection::Forward {
-        todo!();
-    }
+    let rel_track_count = match dir {
+        SledDirection::Forward => track_count as i32,
+        SledDirection::Reverse => -(track_count as i32),
+    };
 
     let new_pos = cdc
         .dsp
         .position
-        .offset_turns(track_count as i32)
+        .offset_turns(rel_track_count)
         .expect("bad jump");
 
     info!(
@@ -1017,7 +1018,10 @@ fn track_jump_2n(cdc: &mut Cdc, dir: SledDirection) {
         dir, track_count, cdc.dsp.position, new_pos
     );
 
+    // XXX I haven't actually checked if the timings differ when seeking backwards, I only timed
+    // forward
     let xbusy_delay = jump_delay(track_count);
+
     cdc.dsp.state = State::Jump(xbusy_delay);
     set_position(cdc, new_pos);
 }
