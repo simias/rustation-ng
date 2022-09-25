@@ -33,7 +33,7 @@ pub struct Decoder {
     /// Host command parameter FIFO
     host_params: HostFifo,
     /// Host command response FIFO
-    host_response: HostFifo,
+    host_result: HostFifo,
     /// Host interrupt status
     hintsts: u8,
     /// Host interrupt mask
@@ -58,7 +58,7 @@ impl Decoder {
             eccsts: 0,
             ram: [0; 32 * 1024],
             host_params: HostFifo::new(),
-            host_response: HostFifo::new(),
+            host_result: HostFifo::new(),
             hintsts: 0,
             hintmsk: 0,
         }
@@ -68,7 +68,7 @@ impl Decoder {
         self.host_command = cmd;
         self.command_busy = true;
 
-        debug!("Host commant 0x{:02x} {:?}", cmd, self.host_params);
+        debug!("Host command 0x{:02x} {:?}", cmd, self.host_params);
 
         self.irq.trigger(Irq::HstCmnd);
     }
@@ -92,8 +92,8 @@ impl Decoder {
         r |= self.hintsts & 7;
         // XXX bit 3: DMABUSY
         r |= ((!self.host_params.is_empty()) as u8) << 4;
-        r |= (self.host_response.is_empty() as u8) << 5;
-        r |= ((!self.host_response.is_full()) as u8) << 6;
+        r |= (self.host_result.is_empty() as u8) << 5;
+        r |= ((!self.host_result.is_full()) as u8) << 6;
         r |= (self.command_busy as u8) << 7;
 
         r
@@ -103,7 +103,15 @@ impl Decoder {
     fn clrctl(&mut self, v: u8) {
         // CLRBUSY
         if v & (1 << 6) != 0 {
+            if self.command_busy {
+                debug!("Host command done, result: {:?}", self.host_result);
+            }
             self.command_busy = false;
+        }
+
+        // CLRRSLT
+        if v & (1 << 5) != 0 {
+            self.host_result.clear();
         }
     }
 
@@ -115,7 +123,7 @@ impl Decoder {
         // TODO: ADPCM busy (ADPBUSY)
         r |= (self.host_params.is_empty() as u8) << 3;
         r |= ((!self.host_params.is_full()) as u8) << 4;
-        r |= (!self.host_response.is_empty() as u8) << 5;
+        r |= (!self.host_result.is_empty() as u8) << 5;
         // TODO: DRQSTS
         r |= (self.command_busy as u8) << 7;
 
@@ -133,6 +141,14 @@ impl Decoder {
         }
 
         self.host_params.push(param);
+    }
+
+    pub fn push_result(&mut self, r: u8) {
+        if self.host_result.is_full() {
+            warn!("Decoder result FIFO overflow!");
+        }
+
+        self.host_result.push(r);
     }
 }
 
@@ -291,6 +307,8 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                     cdc.decoder.dadrc = addr;
                 }
                 cdc.decoder.state = DecoderState::Idle;
+
+                refresh_irq(cdc);
             }
         }
     }
@@ -320,21 +338,21 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.dladr &= 0xff00;
             decoder.dladr |= u16::from(val);
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
         0x05 => {
             debug!("DLADR-M 0x{:02x}", val);
             decoder.dladr &= 0xff;
             decoder.dladr |= u16::from(val) << 8;
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
         0x06 => {
             debug!("DLADR-H 0x{:02x}", val);
             // We have a 32K RAM, DLADR-H should always be zero
             assert_eq!(val, 0, "Unexpected DLADR-H");
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
         0x07 => debug!("CHPCTL 0x{:02x}", val),
         0x09 => {
@@ -367,24 +385,28 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.dadrc &= 0xff00;
             decoder.dadrc |= u16::from(val);
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
         0x11 => {
             debug!("DADRC-M 0x{:02x}", val);
             decoder.dadrc &= 0xff;
             decoder.dadrc |= u16::from(val) << 8;
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
         0x12 => {
             debug!("DADRC-H 0x{:02x}", val);
             // We have a 32K RAM, DADRC-H should always be zero
             assert_eq!(val, 0, "Unexpected DLADR-H");
             // XXX guess
-            cdc.decoder.write_stopped = false;
+            decoder.write_stopped = false;
         }
-        0x16 => todo!("HIFCTL 0x{:02x}", val),
-        0x17 => todo!("RESULT 0x{:02x}", val),
+        // HIFCTL
+        0x16 => {
+            decoder.hintsts &= !7;
+            decoder.hintsts |= val & 7;
+        }
+        0x17 => decoder.push_result(val),
         _ => unimplemented!("sub CPU write 0x{:02x} @ 0x{:02x}", val, addr),
     }
 
@@ -394,19 +416,17 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
 pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
     let decoder = &mut cdc.decoder;
 
-    if addr == 0 {
-        decoder.ra = v & 3;
-        return;
-    }
-
-    match (addr << 2) | decoder.ra {
+    match (addr, decoder.ra) {
+        // ADDRESS
+        (0, _) => decoder.ra = v & 3,
         // COMMAND
-        0b01_00 => decoder.host_command(v),
-        0b10_00 => decoder.push_param(v),
+        (1, 0) => decoder.host_command(v),
+        // PARAMETER
+        (2, 0) => decoder.push_param(v),
         // HINTMSK
-        0b10_01 => decoder.hintmsk = v & 0x1f,
+        (2, 1) => decoder.hintmsk = v & 0x1f,
         // HCLRCTL
-        0b11_01 => {
+        (3, 1) => {
             if v & 0x80 != 0 {
                 unimplemented!("HCLRCTL CHPRST");
             }
@@ -433,8 +453,16 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
 pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
     let decoder = &mut cdc.decoder;
 
-    match addr {
-        0 => decoder.hsts(),
+    match (addr, decoder.ra) {
+        // HSTS
+        (0, _) => decoder.hsts(),
+        // RESULT
+        (1, _) => {
+            assert!(!decoder.host_result.is_empty());
+            decoder.host_result.pop()
+        }
+        // HINTSTS
+        (3, 1) => decoder.hintsts,
         _ => todo!("Host read @ {}:{}", addr, decoder.ra),
     }
 }
@@ -453,6 +481,12 @@ pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {
         // INTSTS
         0x07 => decoder.irq.status,
         0x11 => decoder.hifsts(),
+        // HSTPRM
+        0x12 => {
+            assert!(!decoder.host_params.is_empty());
+            decoder.host_params.pop()
+        }
+        // HSTCMD
         0x13 => decoder.host_command,
         _ => unimplemented!("sub CPU read 0x{:02x}", addr),
     }
