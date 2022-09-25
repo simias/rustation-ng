@@ -7,11 +7,11 @@ use cdimage::Sector;
 pub use mc68hc05::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
 pub struct Cdc {
-    disc: Option<Disc>,
     uc: mc68hc05::Uc,
     decoder: cxd1815q::Decoder,
     dsp: cxd2545q::Dsp,
     date: u32,
+    disc: Option<Disc>,
 }
 
 impl Cdc {
@@ -62,6 +62,16 @@ impl Cdc {
         cxd1815q::host_write(self, addr, v);
     }
 
+    /// Reads coming from the host CPU (the main MIPS CPU)
+    pub fn host_read(&mut self, addr: u8) -> u8 {
+        cxd1815q::host_read(self, addr)
+    }
+
+    /// Returns true if one of the host interrupts is currently active
+    pub fn irq_active(&self) -> bool {
+        self.decoder.host_irq_active()
+    }
+
     pub fn set_debug(&mut self, debug: bool) {
         self.uc.set_debug(debug);
     }
@@ -106,10 +116,6 @@ impl Cdc {
     fn dsp_sector_read(&mut self, sector: Sector) {
         cxd1815q::dsp_sector_read(self, sector);
     }
-
-    pub fn scan(mut self, mode: ScanMode) {
-        mc68hc05::scan(&mut self, mode);
-    }
 }
 
 /// Convert a microseconds to a number of 44.1kHz audio cycles with rounding
@@ -121,9 +127,4 @@ const fn us_to_audio_cycles(us: u32) -> u32 {
     debug_assert!(s > 0);
 
     s as u32
-}
-
-pub enum ScanMode {
-    Byte(u16),
-    Bit(u16, u8),
 }

@@ -1,5 +1,6 @@
 use super::Cdc;
 use cdimage::Sector;
+use std::fmt;
 
 /// CXD1815Q
 pub struct Decoder {
@@ -29,6 +30,14 @@ pub struct Decoder {
     eccsts: u8,
     /// RAM used to store decoded sectors
     ram: [u8; 32 * 1024],
+    /// Host command parameter FIFO
+    host_params: HostFifo,
+    /// Host command response FIFO
+    host_response: HostFifo,
+    /// Host interrupt status
+    hintsts: u8,
+    /// Host interrupt mask
+    hintmsk: u8,
 }
 
 impl Decoder {
@@ -48,12 +57,18 @@ impl Decoder {
             shdr: HdrBuf::new(),
             eccsts: 0,
             ram: [0; 32 * 1024],
+            host_params: HostFifo::new(),
+            host_response: HostFifo::new(),
+            hintsts: 0,
+            hintmsk: 0,
         }
     }
 
     fn host_command(&mut self, cmd: u8) {
         self.host_command = cmd;
         self.command_busy = true;
+
+        debug!("Host commant 0x{:02x} {:?}", cmd, self.host_params);
 
         self.irq.trigger(Irq::HstCmnd);
     }
@@ -74,13 +89,12 @@ impl Decoder {
     fn hifsts(&self) -> u8 {
         let mut r = 0u8;
 
-        r |= (self.command_busy as u8) << 7;
-
-        // XXX bit 6: result_fifo_not_full
-        // XXX bit 5: result_fifo_empty
-        // XXX bit 4: param_fifo_not_empty
+        r |= self.hintsts & 7;
         // XXX bit 3: DMABUSY
-        // XXX bits 2-0: HINTSTS 2-0
+        r |= ((!self.host_params.is_empty()) as u8) << 4;
+        r |= (self.host_response.is_empty() as u8) << 5;
+        r |= ((!self.host_response.is_full()) as u8) << 6;
+        r |= (self.command_busy as u8) << 7;
 
         r
     }
@@ -91,6 +105,34 @@ impl Decoder {
         if v & (1 << 6) != 0 {
             self.command_busy = false;
         }
+    }
+
+    /// Host status register
+    pub fn hsts(&self) -> u8 {
+        let mut r = 0;
+
+        r |= self.ra & 3;
+        // TODO: ADPCM busy (ADPBUSY)
+        r |= (self.host_params.is_empty() as u8) << 3;
+        r |= ((!self.host_params.is_full()) as u8) << 4;
+        r |= (!self.host_response.is_empty() as u8) << 5;
+        // TODO: DRQSTS
+        r |= (self.command_busy as u8) << 7;
+
+        r
+    }
+
+    /// Returns true if at least one unmasked host interrupt is active
+    pub fn host_irq_active(&self) -> bool {
+        self.hintsts & self.hintmsk != 0
+    }
+
+    pub fn push_param(&mut self, param: u8) {
+        if self.host_params.is_full() {
+            warn!("Decoder param FIFO overflow!");
+        }
+
+        self.host_params.push(param);
     }
 }
 
@@ -310,8 +352,16 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             trace!("CLRINT 0x{:02x}", val);
             decoder.irq.status &= !val;
         }
-        0x0c => debug!("HXFR-L 0x{:02x}", val),
-        0x0d => debug!("HXFR-H 0x{:02x}", val),
+        0x0c => {
+            if val != 0 {
+                todo!("HXFR-L 0x{:02x}", val);
+            }
+        }
+        0x0d => {
+            if val != 0x40 {
+                todo!("HXFR-H 0x{:02x}", val);
+            }
+        }
         0x10 => {
             debug!("DADRC-L 0x{:02x}", val);
             decoder.dadrc &= 0xff00;
@@ -333,8 +383,8 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             // XXX guess
             cdc.decoder.write_stopped = false;
         }
-        0x16 => debug!("HIFCTL 0x{:02x}", val),
-        0x17 => debug!("RESULT 0x{:02x}", val),
+        0x16 => todo!("HIFCTL 0x{:02x}", val),
+        0x17 => todo!("RESULT 0x{:02x}", val),
         _ => unimplemented!("sub CPU write 0x{:02x} @ 0x{:02x}", val, addr),
     }
 
@@ -350,11 +400,43 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
     }
 
     match (addr << 2) | decoder.ra {
+        // COMMAND
         0b01_00 => decoder.host_command(v),
-        _ => unimplemented!("Host write 0x{:02x} @ {}:{}", v, addr, decoder.ra),
+        0b10_00 => decoder.push_param(v),
+        // HINTMSK
+        0b10_01 => decoder.hintmsk = v & 0x1f,
+        // HCLRCTL
+        0b11_01 => {
+            if v & 0x80 != 0 {
+                unimplemented!("HCLRCTL CHPRST");
+            }
+
+            if v & 0x20 != 0 {
+                unimplemented!("HCLRCTL SMADPCRL");
+            }
+
+            // CRLPRM
+            if v & 0x40 != 0 {
+                decoder.host_params.clear();
+            }
+
+            let to_ack = v & 0x1f;
+
+            decoder.hintsts &= !to_ack;
+        }
+        _ => todo!("Host write 0x{:02x} @ {}:{}", v, addr, decoder.ra),
     }
 
     refresh_irq(cdc);
+}
+
+pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
+    let decoder = &mut cdc.decoder;
+
+    match addr {
+        0 => decoder.hsts(),
+        _ => todo!("Host read @ {}:{}", addr, decoder.ra),
+    }
 }
 
 pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {
@@ -422,6 +504,7 @@ impl IrqController {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Irq {
     /// Host chip reset issued
@@ -573,5 +656,84 @@ impl HdrBuf {
         self.pos = (self.pos + 1) & 3;
 
         b
+    }
+}
+
+/// 16byte FIFO used to store command arguments and responses
+#[derive(Clone)]
+pub struct HostFifo {
+    /// Data buffer
+    buffer: [u8; 16],
+    /// Write pointer (4bits + carry)
+    write_idx: u8,
+    /// Read pointer (4bits + carry)
+    read_idx: u8,
+}
+
+impl HostFifo {
+    pub fn new() -> HostFifo {
+        HostFifo {
+            buffer: [0; 16],
+            write_idx: 0,
+            read_idx: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        // If both pointers point at the same cell and have the same carry the FIFO is empty.
+        self.write_idx == self.read_idx
+    }
+
+    pub fn is_full(&self) -> bool {
+        // The FIFO is full if both indexes point to the same cell while having a different carry.
+        self.write_idx == self.read_idx ^ 0x10
+    }
+
+    pub fn clear(&mut self) {
+        self.write_idx = 0;
+        self.read_idx = 0;
+        self.buffer = [0; 16];
+    }
+
+    pub fn push(&mut self, val: u8) {
+        let idx = (self.write_idx & 0xf) as usize;
+
+        self.buffer[idx] = val;
+
+        self.write_idx = self.write_idx.wrapping_add(1) & 0x1f;
+    }
+
+    pub fn pop(&mut self) -> u8 {
+        debug_assert!(!self.is_empty());
+
+        let idx = (self.read_idx & 0xf) as usize;
+
+        self.read_idx = self.read_idx.wrapping_add(1) & 0x1f;
+
+        self.buffer[idx]
+    }
+}
+
+impl fmt::Debug for HostFifo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fifo = self.clone();
+
+        let mut first = true;
+
+        write!(f, "[")?;
+
+        while !fifo.is_empty() {
+            let v = fifo.pop();
+
+            if first {
+                first = false;
+            } else {
+                write!(f, ", ")?;
+            }
+
+            write!(f, "0x{:02x}", v)?;
+        }
+
+        write!(f, "]")
     }
 }

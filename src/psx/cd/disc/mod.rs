@@ -50,10 +50,6 @@ impl Disc {
     pub fn serial_number(&self) -> SerialNumber {
         self.serial
     }
-
-    pub fn image(&mut self) -> &mut CdCache {
-        &mut self.cache
-    }
 }
 
 /// Disc region

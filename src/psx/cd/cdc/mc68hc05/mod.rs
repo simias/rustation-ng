@@ -1,6 +1,6 @@
 mod instructions;
 
-use super::{Cdc, ScanMode};
+use super::Cdc;
 
 /// MC68HC05 microcontroller
 pub struct Uc {
@@ -58,8 +58,6 @@ pub struct Uc {
     debug: bool,
     /// We keep running until the cycle budget reaches 0
     cycle_budget: i32,
-    scan_mode: Option<ScanMode>,
-    instruction_pc: u16,
 }
 
 impl Uc {
@@ -115,8 +113,6 @@ impl Uc {
             misc: Misc::new(),
             debug: false,
             cycle_budget: 0,
-            scan_mode: None,
-            instruction_pc: 0,
         };
 
         // Port D and E are output-only
@@ -165,64 +161,6 @@ impl Uc {
 
     pub fn set_debug(&mut self, debug: bool) {
         self.debug = debug;
-    }
-
-    pub fn test_bit(&mut self, addr: u16, bit: u8) {
-        match self.scan_mode {
-            Some(ScanMode::Bit(a, b)) => {
-                if addr == a && bit == b {
-                    info!("Target bit read PC {:x}", self.instruction_pc);
-                }
-            }
-            Some(ScanMode::Byte(_)) => self.byte_read(addr),
-            _ => (),
-        }
-    }
-
-    pub fn set_bit(&mut self, addr: u16, bit: u8) {
-        match self.scan_mode {
-            Some(ScanMode::Bit(a, b)) => {
-                if addr == a && bit == b {
-                    info!("Target bit set PC {:x}", self.instruction_pc);
-                }
-            }
-            Some(ScanMode::Byte(_)) => self.byte_write(addr),
-            _ => (),
-        }
-    }
-
-    pub fn clear_bit(&mut self, addr: u16, bit: u8) {
-        match self.scan_mode {
-            Some(ScanMode::Bit(a, b)) => {
-                if addr == a && bit == b {
-                    info!("Target bit clear PC {:x}", self.instruction_pc);
-                }
-            }
-            Some(ScanMode::Byte(_)) => self.byte_write(addr),
-            _ => (),
-        }
-    }
-
-    pub fn byte_read(&mut self, addr: u16) {
-        match self.scan_mode {
-            Some(ScanMode::Byte(a)) => {
-                if a == addr {
-                    info!("Target byte read PC {:x}", self.instruction_pc);
-                }
-            }
-            _ => (),
-        }
-    }
-
-    pub fn byte_write(&mut self, addr: u16) {
-        match self.scan_mode {
-            Some(ScanMode::Byte(a)) => {
-                if a == addr {
-                    info!("Target byte write PC {:x}", self.instruction_pc);
-                }
-            }
-            _ => (),
-        }
     }
 
     pub fn is_laser_on(&self) -> bool {
@@ -320,9 +258,7 @@ impl Uc {
     }
 
     fn pop_pc(&mut self) {
-        if self.scan_mode.is_none() {
-            self.pc = self.pop16();
-        }
+        self.pc = self.pop16();
     }
 
     fn push_ccr(&mut self) {
@@ -375,15 +311,11 @@ impl Uc {
         self.irq_disable = true;
 
         // Jump to vector
-        if self.scan_mode.is_none() {
-            self.pc = self.vector_address(vector);
-        }
+        self.pc = self.vector_address(vector);
     }
 
     fn jump(&mut self, target: u16) {
-        if self.scan_mode.is_none() {
-            self.pc = target;
-        }
+        self.pc = target;
     }
 
     /// Called by the decoder to set the level of the XINT signal. In practice the SCPH-1002's
@@ -550,22 +482,6 @@ fn run_uc(cdc: &mut Cdc) {
     }
 }
 
-pub fn scan(cdc: &mut Cdc, mode: ScanMode) {
-    cdc.uc.scan_mode = Some(mode);
-
-    // Scan the entire ROM until self-check
-    cdc.uc.pc = 0x1000;
-
-    while cdc.uc.pc < 0xfe00 {
-        cdc.uc.instruction_pc = cdc.uc.pc;
-        let op = cdc.uc.pc_next();
-
-        let instruction = &instructions::OPCODE_MAP[op as usize];
-
-        (instruction.handler)(cdc);
-    }
-}
-
 /// Returns the number of cycles elapsed to run this instruction
 fn run_next_instruction(cdc: &mut Cdc) -> u8 {
     let breakpoint: &[u16] = &[
@@ -658,10 +574,6 @@ fn load(cdc: &mut Cdc, addr: u16) -> u8 {
         return cdc.uc.memory[addr as usize];
     }
 
-    if cdc.uc.scan_mode.is_some() {
-        return 0;
-    }
-
     match addr {
         0x10 => cdc.uc.timebase_ctrl1.0,
         0x11 => cdc.uc.timebase_ctrl2.get(),
@@ -687,10 +599,6 @@ fn store(cdc: &mut Cdc, addr: u16, val: u8) {
         } else {
             store_io_port_value(cdc, addr, val);
         }
-        return;
-    }
-
-    if cdc.uc.scan_mode.is_some() {
         return;
     }
 
@@ -764,10 +672,6 @@ fn load_io_port_option(cdc: &mut Cdc, addr: u16) -> u8 {
 }
 
 fn store_io_port_value(cdc: &mut Cdc, addr: u16, val: u8) {
-    if cdc.uc.scan_mode.is_some() {
-        return;
-    }
-
     match addr {
         0x00 | 0x01 | 0x04 => cdc.uc.io_ports[addr as usize].set_output(val),
         0x02 => {
@@ -879,10 +783,6 @@ fn store_io_port_value(cdc: &mut Cdc, addr: u16, val: u8) {
 }
 
 fn load_io_port_value(cdc: &mut Cdc, addr: u16) -> u8 {
-    if cdc.uc.scan_mode.is_some() {
-        return 0;
-    }
-
     match addr {
         0x00..=0x04 => cdc.uc.io_ports[addr as usize].load(),
         0x08 => cdc.uc.intcr.0,

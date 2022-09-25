@@ -9,8 +9,6 @@ fn brset(cdc: &mut Cdc, bit: u8) {
 
     cdc.uc.carry = v & (1 << bit) != 0;
 
-    cdc.uc.test_bit(test_addr, bit);
-
     if cdc.uc.carry {
         cdc.uc.jump(target);
     }
@@ -65,8 +63,6 @@ fn brclr(cdc: &mut Cdc, bit: u8) {
 
     cdc.uc.carry = v & (1 << bit) != 0;
 
-    cdc.uc.test_bit(test_addr, bit);
-
     if !cdc.uc.carry {
         cdc.uc.jump(target);
     }
@@ -118,8 +114,6 @@ fn bset(cdc: &mut Cdc, bit: u8) {
 
     let v = super::load(cdc, addr);
 
-    cdc.uc.set_bit(addr, bit);
-
     super::store(cdc, addr, v | (1 << bit))
 }
 
@@ -168,8 +162,6 @@ fn bclr(cdc: &mut Cdc, bit: u8) {
     let addr = Dir::get_addr(cdc);
 
     let v = super::load(cdc, addr);
-
-    cdc.uc.clear_bit(addr, bit);
 
     super::store(cdc, addr, v & !(1 << bit))
 }
@@ -363,8 +355,6 @@ where
     let v = super::load(cdc, addr).wrapping_sub(1);
     super::store(cdc, addr, v);
 
-    cdc.uc.byte_write(addr);
-
     cdc.uc.negative = (v & 0x80) != 0;
     cdc.uc.zero = v == 0;
 }
@@ -378,8 +368,6 @@ where
 
     let v = super::load(cdc, addr).wrapping_add(1);
     super::store(cdc, addr, v);
-
-    cdc.uc.byte_write(addr);
 
     cdc.uc.negative = (v & 0x80) != 0;
     cdc.uc.zero = v == 0;
@@ -438,8 +426,6 @@ where
     let r = v << 1 | c;
 
     super::store(cdc, addr, r);
-
-    cdc.uc.byte_write(addr);
 
     cdc.uc.carry = (v & 0x80) != 0;
     cdc.uc.negative = (r & 0x80) != 0;
@@ -511,8 +497,6 @@ where
     let addr = M::get_addr(cdc);
 
     super::store(cdc, addr, 0);
-
-    cdc.uc.byte_write(addr);
 
     cdc.uc.negative = false;
     cdc.uc.zero = true;
@@ -752,7 +736,6 @@ where
 
 fn sta(cdc: &mut Cdc, addr: u16) {
     super::store(cdc, addr, cdc.uc.a);
-    cdc.uc.byte_write(addr);
 }
 
 /// Store accumulator
@@ -767,7 +750,6 @@ where
 
 fn stx(cdc: &mut Cdc, addr: u16) {
     super::store(cdc, addr, cdc.uc.x);
-    cdc.uc.byte_write(addr);
 }
 
 /// Store index
@@ -804,10 +786,6 @@ where
 
 /// Placeholder for unimplemented instructions
 fn unimplemented(cdc: &mut Cdc) {
-    if cdc.uc.scan_mode.is_some() {
-        return;
-    }
-
     let prev_pc = cdc.uc.pc.wrapping_sub(1);
 
     let op = cdc.uc.memory[prev_pc as usize];
@@ -833,7 +811,6 @@ where
 {
     fn get_value(cdc: &mut Cdc) -> u8 {
         let addr = Self::get_addr(cdc);
-        cdc.uc.byte_read(addr);
 
         super::load(cdc, addr)
     }

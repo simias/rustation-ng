@@ -4,7 +4,7 @@ mod cdc;
 pub mod disc;
 pub mod iso9660;
 
-use super::{Addressable, Psx};
+use super::{irq, Addressable, Psx};
 use crate::error::{PsxError, Result};
 pub use cdc::MC68HC05_ROM_DUMP_SIZE as CDC_ROM_SIZE;
 use disc::Disc;
@@ -12,6 +12,7 @@ use shaman::{digest::Digest, sha2::Sha256};
 
 pub struct CdInterface {
     cdc: cdc::Cdc,
+    irq_active: bool,
 }
 
 impl CdInterface {
@@ -43,7 +44,9 @@ impl CdInterface {
 
         cdc.set_shell_open(false);
 
-        Ok(CdInterface { cdc })
+        let irq_active = cdc.irq_active();
+
+        Ok(CdInterface { cdc, irq_active })
     }
 }
 
@@ -54,16 +57,36 @@ pub fn dma_load(_psx: &mut Psx) -> u32 {
 
 pub fn run_audio_cycle(psx: &mut Psx, _mode: CycleMode) -> (i16, i16) {
     psx.cd.cdc.run_audio_cycle();
+    refresh_irq(psx);
 
     (0, 0)
 }
 
-pub fn store<T: Addressable>(_psx: &mut Psx, _off: u32, _val: T) {
-    todo!()
+pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
+    let v = val.as_u8();
+    let off = off as u8;
+
+    psx.cd.cdc.host_write(off, v);
+
+    refresh_irq(psx);
 }
 
-pub fn load<T: Addressable>(_psx: &mut Psx, _off: u32) -> T {
-    todo!()
+pub fn load<T: Addressable>(psx: &mut Psx, off: u32) -> T {
+    let off = off as u8;
+
+    let v = psx.cd.cdc.host_read(off);
+
+    T::from_u32(u32::from(v))
+}
+
+fn refresh_irq(psx: &mut Psx) {
+    let irq = psx.cd.cdc.irq_active();
+
+    if irq && !psx.cd.irq_active {
+        irq::trigger(psx, irq::Interrupt::CdRom);
+    }
+
+    psx.cd.irq_active = irq;
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
