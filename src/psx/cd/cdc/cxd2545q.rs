@@ -15,6 +15,8 @@ pub struct Dsp {
     /// in fact prevent the execution of auto sequences (they seem to run perfectly normally,
     /// including the optional timeout).
     aseq: bool,
+    /// Double speed, set by 0x9 "Function specification"
+    dspb: bool,
     /// Focus control, as configured by command 0x0
     focus_control: u8,
     /// Tracking control, as configured by command 0x1
@@ -72,6 +74,7 @@ impl Dsp {
             command_sr: 0,
             sens_sr: 0,
             aseq: false,
+            dspb: false,
             focus_control: 0x00,
             tracking_control: 0x11,
             tracking_mode: 0x20,
@@ -150,8 +153,7 @@ impl Dsp {
 
     /// Returns true if the configured disc speed is 2x, false if it's 1x.
     fn is_speed_2x(&self) -> bool {
-        // XXX For now we only support 1x
-        false
+        self.dspb
     }
 
     /// Build the SCEx license string for the loaded disc.

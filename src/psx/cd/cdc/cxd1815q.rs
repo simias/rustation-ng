@@ -550,9 +550,12 @@ pub fn dsp_sector_read(cdc: &mut Cdc, sector: Sector) {
     // the datasheet seems to hint that it's handled differently in this case). Also in 2x where
     // it's probably faster than that since otherwise it wouldn't be able to maintain that speed
     // (2x means one sector every 294 audio cycles).
+    //
+    // For now I decided to keep it simple and arbitrarily set the delay at 100 cycles all the
+    // time, we can improve that later.
     cdc.decoder.state = DecoderState::SectorPending {
         sector,
-        decint_delay: 303,
+        decint_delay: 100,
     };
 }
 
