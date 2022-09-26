@@ -79,7 +79,7 @@ impl Decoder {
     }
 
     /// Decoder status register
-    fn dests(&self) -> u8 {
+    fn decsts(&self) -> u8 {
         // XXX Implement RTADPBSY when streaming ADPCM. The other two bits in the register are only
         // set when the sector sync mark has been missed which is probably irrelevant for us.
         0
@@ -159,11 +159,13 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
             ref sector,
             ref mut decint_delay,
         } => {
-            let mode = cdc.decoder.decctl.mode();
-
             if *decint_delay > 1 {
                 *decint_delay -= 1;
             } else {
+                let mode = cdc.decoder.decctl.mode();
+
+                debug!("Sector read {:?}", mode);
+
                 // Sector read completed, trigger DECINT if necessary
                 if mode.decint() {
                     cdc.decoder.irq.trigger(Irq::DecInt);
@@ -177,6 +179,128 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                 cdc.decoder.hdr.reset(array_ref![raw_data, 12, 4]);
                 cdc.decoder.shdr.reset(array_ref![raw_data, 16, 4]);
 
+                if matches!(
+                    mode,
+                    DecoderMode::MonitorOnly
+                        | DecoderMode::WriteOnly
+                        | DecoderMode::RealTimeCorrection
+                ) {
+                    // Check for sync field
+                    let has_sync = raw_data[0] == 0
+                        && raw_data[11] == 0
+                        && raw_data[1..11].iter().all(|&b| b == 0xff);
+
+                    if has_sync {
+                        cdc.decoder.dectout_sectors = 0;
+
+                        cdc.decoder.eccsts = 0;
+
+                        if sector.edc_valid() {
+                            // Set EDCOK
+                            cdc.decoder.eccsts |= 1 << 3;
+                            // Set ECCOK
+                            cdc.decoder.eccsts |= 1 << 2;
+                        } else {
+                            unimplemented!("Read sector with EDC errors");
+                        }
+
+                        let edc_start;
+
+                        // Update ECCSTS mode
+                        cdc.decoder.eccsts |= match (
+                            cdc.decoder.decctl.mode_form_sel(),
+                            raw_data[15],
+                            raw_data[18] & (1 << 5) != 0,
+                        ) {
+                            // Mode 1
+                            (None | Some(0b00), 1, _form) => {
+                                edc_start = 2064;
+                                0b00
+                            }
+                            // Mode 2 Form 1
+                            (None | Some(0b10), 2, false) => {
+                                edc_start = 2072;
+                                0b10
+                            }
+                            // Mode 2 Form 2
+                            (None | Some(0b11), 2, true) => {
+                                edc_start = 2348;
+                                0b11
+                            }
+                            (None, m, _form) => {
+                                // Probably means that it's either not a CD-ROM sector, or it's
+                                // corrupted. It could also be Mode 0 which is a CD-ROM sector
+                                // that contains no data. According to the datasheet in this
+                                // mode the correction is inhibited.
+                                warn!("Unhandled sector mode {}", m);
+                                edc_start = 2064;
+
+                                // Set CORINH
+                                cdc.decoder.eccsts |= 1 << 5;
+
+                                // Not sure what value is used here
+                                0b00
+                            }
+                            // AUTODIST is not set and the configured value does not match the
+                            // sector format, this will trigger ECC/EDC errors
+                            //
+                            // I think the firmware only sets !AUTODIST early after the decoder
+                            // reinit because of a bug (it writes 0xb6 to DECCTL instead of *0xb6).
+                            // In this case the ECC format is forced to Mode 2, Form 2. Otherwise
+                            // AUTODIST should always be set as far as I can tell.
+                            (Some(mb), mode, form) => {
+                                warn!(
+                                    "Incompatible decoder ECC config and sector format: \
+                                      {:x} DECCTL{}, mode: {}, form: {}",
+                                    cdc.decoder.decctl.0, mb, mode, form
+                                );
+
+                                // The following is guesswork
+
+                                // Clear EDCOK
+                                cdc.decoder.eccsts &= !(1 << 3);
+                                // Clear ECCOK
+                                cdc.decoder.eccsts &= !(1 << 2);
+
+                                edc_start = match mb {
+                                    // XXX 0b01 is undocumented, so that's a guess
+                                    0b00 | 0b01 => 2064,
+                                    0b10 => 2072,
+                                    0b11 => 2348,
+                                    _ => unreachable!(),
+                                };
+
+                                mb
+                            }
+                        };
+
+                        // Update EDCALL0
+                        if raw_data[edc_start]
+                            | raw_data[edc_start + 1]
+                            | raw_data[edc_start + 2]
+                            | raw_data[edc_start + 3]
+                            == 0
+                        {
+                            warn!("ECC @ {} is all zeroes", edc_start);
+                            cdc.decoder.eccsts |= 1 << 7;
+                        }
+                    } else {
+                        // We get the IRQ if the sync is not detected after 3 sectors
+                        if cdc.decoder.dectout_sectors >= 2 {
+                            cdc.decoder.irq.trigger(Irq::DrvOvrn);
+                        } else {
+                            cdc.decoder.dectout_sectors += 1;
+                        }
+                    }
+                    debug!(
+                        "Sector read ECCSTS: {:x} sync: {}",
+                        cdc.decoder.eccsts, has_sync
+                    );
+                } else {
+                    // Maybe?
+                    cdc.decoder.eccsts = 0;
+                }
+
                 // Load the sector in RAM. Normally this should certainly not happen all at once
                 // but it's good enough for now.
                 if mode.write_to_ram() {
@@ -186,98 +310,6 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                     // accurate or if it must be done by the sub-CPU. In order for CMADR to work
                     // the sector has to be stored at a kilobyte boundary
                     addr = addr.wrapping_add(0x3ff) & 0x7c00;
-
-                    if matches!(
-                        mode,
-                        DecoderMode::MonitorOnly
-                            | DecoderMode::WriteOnly
-                            | DecoderMode::RealTimeCorrection
-                    ) {
-                        // Check for sync field
-                        let has_sync = raw_data[0] == 0
-                            && raw_data[12] == 0
-                            && raw_data[1..12].iter().all(|&b| b == 0xff);
-
-                        if has_sync {
-                            cdc.decoder.dectout_sectors = 0;
-
-                            cdc.decoder.eccsts = 0;
-
-                            let ecc_start;
-
-                            // Update ECCSTS mode
-                            cdc.decoder.eccsts |= match (
-                                cdc.decoder.decctl.mode_form_sel(),
-                                raw_data[15],
-                                raw_data[18] & (1 << 5) != 0,
-                            ) {
-                                // AUTODIST is not set, use the configured value
-                                //
-                                // XXX We should probably test if the configured value matches the
-                                // actual sector format, otherwise things will obviously go badly.
-                                // In practice I believe that the BIOS only uses AUTODIST so it
-                                // shouldn't matter.
-                                (Some(_mf), _mode, _form) => {
-                                    unimplemented!("sector read without autodist")
-                                }
-                                // Mode 1
-                                (None, 1, _form) => {
-                                    ecc_start = 2064;
-                                    0b00
-                                }
-                                // Mode 2 Form 1
-                                (None, 2, false) => {
-                                    ecc_start = 2072;
-                                    0b10
-                                }
-                                // Mode 2 Form 2
-                                (None, 2, true) => {
-                                    ecc_start = 2348;
-                                    0b11
-                                }
-                                (None, m, _form) => {
-                                    // Probably means that it's either not a CD-ROM sector, or it's
-                                    // corrupted. It could also be Mode 0 which is a CD-ROM sector
-                                    // that contains no data. According to the datasheet in this
-                                    // mode the correction is inhibited.
-                                    warn!("Unhandled sector mode {}", m);
-                                    ecc_start = 2064;
-
-                                    // Set CORINH
-                                    cdc.decoder.eccsts |= 1 << 5;
-
-                                    // Not sure what value is used here
-                                    0b00
-                                }
-                            };
-
-                            // Update EDCALL0
-                            if raw_data[ecc_start]
-                                | raw_data[ecc_start + 1]
-                                | raw_data[ecc_start + 2]
-                                | raw_data[ecc_start + 3]
-                                == 0
-                            {
-                                cdc.decoder.eccsts |= 1 << 7;
-                            }
-
-                            if sector.edc_valid() {
-                                // Set EDCOK
-                                cdc.decoder.eccsts |= 1 << 3;
-                                // Set ECCOK
-                                cdc.decoder.eccsts |= 1 << 2;
-                            } else {
-                                unimplemented!("Read sector with EDC errors");
-                            }
-                        } else {
-                            // We get the IRQ if the sync is not detected after 3 sectors
-                            if cdc.decoder.dectout_sectors >= 2 {
-                                cdc.decoder.irq.trigger(Irq::DrvOvrn);
-                            } else {
-                                cdc.decoder.dectout_sectors += 1;
-                            }
-                        }
-                    }
 
                     // XXX Pure guesswork For CD-DA. In other modes we skip the sync bytes.
                     let sector_off = if mode == DecoderMode::CdDa { 0 } else { 12 };
@@ -480,10 +512,17 @@ pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {
 
     // trace!("DECODER read 0x{:02x}", addr);
     match addr {
+        // ECCSTS
         0x00 => decoder.eccsts(),
-        0x01 => decoder.dests(),
+        // DECSTS
+        0x01 => decoder.decsts(),
+        // HDRFLG
+        // Should report errors (post-correction) on the various header and sub-header bytes
+        0x02 => 0,
         // HDR
         0x03 => decoder.hdr.read(),
+        // SHDR
+        0x04 => decoder.shdr.read(),
         // CMADR
         0x05 => ((decoder.dadrc >> 10) & 0x7f) as u8,
         // INTSTS
@@ -542,6 +581,7 @@ impl IrqController {
     }
 
     fn trigger(&mut self, irq: Irq) {
+        debug!("Decoder trigger {:?}", irq);
         self.status |= 1u8 << (irq as u8);
     }
 }
@@ -603,7 +643,7 @@ impl DecCtl {
     /// If autodist is enabled, returns None, otherwise returns the value of the modesel and
     /// formsel bits
     fn mode_form_sel(self) -> Option<u8> {
-        if self.0 & 8 == 1 {
+        if self.0 & 8 != 0 {
             None
         } else {
             Some((self.0 >> 4) & 3)
