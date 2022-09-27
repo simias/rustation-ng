@@ -11,7 +11,7 @@ checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 [[package]]
 name = "cdimage"
 version = "0.1.0"
-source = "git+https://github.com/simias/cdimage?branch=master#97b83ca030303dba7935aa2a689ed333df00fd66"
+source = "git+https://github.com/simias/cdimage?branch=master#b9bd60162e5491974cbafbdf20b0e551383d5d91"
 dependencies = [
  "arrayref",
  "thiserror",
@@ -140,9 +140,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.100"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52205623b1b0f064a4e71182c3b18ae902267282930c6d5462c91b859668426e"
+checksum = "e90cde112c4b9690b8cbe810cba9ddd8bc1d7472e2cae317b69e9438c1cba7d2"
 dependencies = [
  "proc-macro2",
  "quote",

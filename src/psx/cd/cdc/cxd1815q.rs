@@ -182,7 +182,7 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
             } else {
                 let mode = cdc.decoder.decctl.mode();
 
-                debug!("Sector read {:?}", mode);
+                debug!("Sector read {} {:?}", sector.q().amsf(), mode);
 
                 // Sector read completed, trigger DECINT if necessary
                 if mode.decint() {
@@ -329,6 +329,14 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                     // the sector has to be stored at a kilobyte boundary
                     addr = addr.wrapping_add(0x3ff) & 0x7c00;
 
+                    // Again, not documented, but given the real hardware behaviour it does seem
+                    // that there only are 8 sector buffers and the rest is reserved for ADPCM
+                    // sound maps. I really need to test this more however, I find it pretty
+                    // suspicious.
+                    if addr >= 0x6000 {
+                        addr = 0;
+                    }
+
                     cdc.decoder.cmadr = (addr >> 10) as u8;
 
                     // XXX For CD-DA mode do we also drop the first 12 bytes? If not, how does this
@@ -350,14 +358,9 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                                 // CD-DA mode *even* if ENDLADR is not set
                                 cdc.decoder.irq.trigger(Irq::DrvOvrn);
                             }
-
-                            // The datasheet doesn't actually says that this happens but given that
-                            // the firmware doesn't seem to actively manage the buffer addresses in
-                            // any way I think this makes sense.
-                            addr = 0;
-                        } else {
-                            addr = (addr + 1) & 0x7fff;
                         }
+
+                        addr += 1;
                     }
 
                     cdc.decoder.dadrc = addr;
@@ -377,12 +380,19 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
 
     match addr {
         0x00 => debug!("DRVIF 0x{:02x}", val),
+        // CONFIG1
         0x01 => {
             // The PlayStation normally uses 32Kx8b RAM config
             assert_eq!((val >> 2) & 7, 0, "Unexpected RAM config");
             debug!("CONFIG_1 0x{:02x}", val);
         }
-        0x02 => debug!("CONFIG_2 0x{:02x}", val),
+        // CONFIG2
+        0x02 => {
+            if val.bit(3) {
+                unimplemented!("CONFIG2 SMBF2");
+            }
+            debug!("CONFIG_2 0x{:02x}", val);
+        }
         0x03 => {
             decoder.decctl = DecCtl(val);
             decoder.dectout_sectors = 0;
@@ -441,7 +451,7 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
                 unimplemented!("HADR bit16 set");
             }
 
-            decoder.dishxfrc = val & 0x80 != 0;
+            decoder.dishxfrc = val.bit(7);
         }
         0x0e => {
             debug!("HADR-L 0x{:02x}", val);
@@ -524,7 +534,15 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
                     decoder.hxfrc = 0;
                 } else {
                     decoder.hxfrc = decoder.hxfr;
-                    debug!("Host DMA read started {}", decoder.hxfrc);
+                    let madr = usize::from(decoder.hadr & 0x7c00);
+                    debug!(
+                        "Host DMA read started {} 0x{:04x} {:02x}:{:02x}:{:02x}",
+                        decoder.hxfrc,
+                        decoder.hadr,
+                        decoder.ram[madr],
+                        decoder.ram[madr + 1],
+                        decoder.ram[madr + 2],
+                    );
                 }
             }
         }
@@ -628,7 +646,7 @@ pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {
         // SHDR
         0x04 => decoder.shdr.read(),
         // CMADR
-        0x05 => ((decoder.dadrc >> 10) & 0x7f) as u8,
+        0x05 => cdc.decoder.cmadr,
         // INTSTS
         0x07 => decoder.irq.status,
         0x11 => decoder.hifsts(),
@@ -738,19 +756,14 @@ impl DecCtl {
     fn endladr(self) -> bool {
         use DecoderMode::*;
 
-        // ENDLADR bit
-        if self.0 & (1u8 << 7) == 0 {
-            false
-        } else {
-            // Per the datasheet, the ENDLADR function is only effective in these modes
-            matches!(self.mode(), WriteOnly | RealTimeCorrection | CdDa)
-        }
+        // Per the datasheet, the ENDLADR function is only effective in these modes
+        self.0.bit(7) && matches!(self.mode(), WriteOnly | RealTimeCorrection | CdDa)
     }
 
     /// If autodist is enabled, returns None, otherwise returns the value of the modesel and
     /// formsel bits
     fn mode_form_sel(self) -> Option<u8> {
-        if self.0 & 8 != 0 {
+        if self.0.bit(3) {
             None
         } else {
             Some((self.0 >> 4) & 3)
