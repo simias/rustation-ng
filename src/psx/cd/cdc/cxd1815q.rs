@@ -16,6 +16,8 @@ pub struct Decoder {
     decctl: DecCtl,
     /// Decoder current address
     dadrc: u16,
+    /// Current minute address
+    cmadr: u8,
     /// Decoder last address
     dladr: u16,
     /// Writing to the RAM buffer is stopped
@@ -51,6 +53,7 @@ impl Decoder {
             decctl: DecCtl(0),
             dladr: 0,
             dadrc: 0,
+            cmadr: 0,
             write_stopped: false,
             dectout_sectors: 0,
             hdr: HdrBuf::new(),
@@ -287,14 +290,14 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                     } else {
                         // We get the IRQ if the sync is not detected after 3 sectors
                         if cdc.decoder.dectout_sectors >= 2 {
-                            cdc.decoder.irq.trigger(Irq::DrvOvrn);
+                            cdc.decoder.irq.trigger(Irq::DecTOut);
                         } else {
                             cdc.decoder.dectout_sectors += 1;
                         }
                     }
                     debug!(
-                        "Sector read ECCSTS: {:x} sync: {}",
-                        cdc.decoder.eccsts, has_sync
+                        "Sector read ECCSTS: {:x} sync: {} addr: {:x}",
+                        cdc.decoder.eccsts, has_sync, cdc.decoder.cmadr
                     );
                 } else {
                     // Maybe?
@@ -311,10 +314,11 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                     // the sector has to be stored at a kilobyte boundary
                     addr = addr.wrapping_add(0x3ff) & 0x7c00;
 
-                    // XXX Pure guesswork For CD-DA. In other modes we skip the sync bytes.
-                    let sector_off = if mode == DecoderMode::CdDa { 0 } else { 12 };
+                    cdc.decoder.cmadr = (addr >> 10) as u8;
 
-                    for &b in &raw_data[sector_off..] {
+                    // XXX For CD-DA mode do we also drop the first 12 bytes? If not, how does this
+                    // play with ENDLADR, since it assumes 0x923B sectors?
+                    for &b in &raw_data[12..] {
                         if cdc.decoder.write_stopped {
                             break;
                         }
@@ -331,9 +335,14 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                                 // CD-DA mode *even* if ENDLADR is not set
                                 cdc.decoder.irq.trigger(Irq::DrvOvrn);
                             }
-                        }
 
-                        addr = (addr + 1) & 0x7fff;
+                            // The datasheet doesn't actually says that this happens but given that
+                            // the firmware doesn't seem to actively manage the buffer addresses in
+                            // any way I think this makes sense.
+                            addr = 0;
+                        } else {
+                            addr = (addr + 1) & 0x7fff;
+                        }
                     }
 
                     cdc.decoder.dadrc = addr;
