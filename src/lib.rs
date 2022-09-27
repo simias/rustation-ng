@@ -38,6 +38,7 @@ extern crate shaman;
 extern crate thiserror;
 
 mod assembler;
+mod bitwise;
 mod error;
 mod memory_card;
 #[macro_use]

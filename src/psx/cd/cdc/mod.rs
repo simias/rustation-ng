@@ -67,6 +67,11 @@ impl Cdc {
         cxd1815q::host_read(self, addr)
     }
 
+    /// DMA (sector data) reads coming from the host CPU (the main MIPS CPU)
+    pub fn host_dma_read(&mut self) -> u8 {
+        cxd1815q::host_dma_read(self)
+    }
+
     /// Returns true if one of the host interrupts is currently active
     pub fn irq_active(&self) -> bool {
         self.decoder.host_irq_active()

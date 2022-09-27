@@ -1,4 +1,5 @@
 use super::Cdc;
+use crate::bitwise::Bitwise;
 use cdimage::Sector;
 use std::fmt;
 
@@ -20,6 +21,14 @@ pub struct Decoder {
     cmadr: u8,
     /// Decoder last address
     dladr: u16,
+    /// Host address
+    hadr: u16,
+    /// Host tranfer
+    hxfr: u16,
+    /// Host tranfer counter
+    hxfrc: u16,
+    /// Disable host tranfer counter
+    dishxfrc: bool,
     /// Writing to the RAM buffer is stopped
     write_stopped: bool,
     /// Counter for the DECTOUT IRQ
@@ -52,6 +61,10 @@ impl Decoder {
             ra: 0,
             decctl: DecCtl(0),
             dladr: 0,
+            hadr: 0,
+            hxfr: 0,
+            hxfrc: 0,
+            dishxfrc: false,
             dadrc: 0,
             cmadr: 0,
             write_stopped: false,
@@ -93,11 +106,12 @@ impl Decoder {
         let mut r = 0u8;
 
         r |= self.hintsts & 7;
-        // XXX bit 3: DMABUSY
-        r |= ((!self.host_params.is_empty()) as u8) << 4;
-        r |= (self.host_result.is_empty() as u8) << 5;
-        r |= ((!self.host_result.is_full()) as u8) << 6;
-        r |= (self.command_busy as u8) << 7;
+        // DMABUSY
+        r.set_bit(3, self.hxfrc > 0);
+        r.set_bit(4, !self.host_params.is_empty());
+        r.set_bit(5, self.host_result.is_empty());
+        r.set_bit(6, !self.host_result.is_full());
+        r.set_bit(7, self.command_busy);
 
         r
     }
@@ -105,7 +119,7 @@ impl Decoder {
     /// Clear control register
     fn clrctl(&mut self, v: u8) {
         // CLRBUSY
-        if v & (1 << 6) != 0 {
+        if v.bit(6) {
             if self.command_busy {
                 debug!("Host command done, result: {:?}", self.host_result);
             }
@@ -113,7 +127,7 @@ impl Decoder {
         }
 
         // CLRRSLT
-        if v & (1 << 5) != 0 {
+        if v.bit(5) {
             self.host_result.clear();
         }
     }
@@ -124,10 +138,11 @@ impl Decoder {
 
         r |= self.ra & 3;
         // TODO: ADPCM busy (ADPBUSY)
-        r |= (self.host_params.is_empty() as u8) << 3;
-        r |= ((!self.host_params.is_full()) as u8) << 4;
-        r |= (!self.host_result.is_empty() as u8) << 5;
-        // TODO: DRQSTS
+        r.set_bit(3, self.host_params.is_empty());
+        r.set_bit(4, !self.host_params.is_full());
+        r.set_bit(5, !self.host_result.is_empty());
+        // DRQSTS
+        r.set_bit(6, self.hxfrc > 0);
         r |= (self.command_busy as u8) << 7;
 
         r
@@ -412,14 +427,31 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.irq.status &= !val;
         }
         0x0c => {
-            if val != 0 {
-                todo!("HXFR-L 0x{:02x}", val);
-            }
+            debug!("HXFR-L 0x{:02x}", val);
+            decoder.hxfr &= 0xff00;
+            decoder.hxfr |= u16::from(val);
         }
         0x0d => {
-            if val != 0x40 {
-                todo!("HXFR-H 0x{:02x}", val);
+            debug!("HXFR-H 0x{:02x}", val);
+            decoder.hxfr &= 0xff;
+            decoder.hxfr |= u16::from(val & 0xf) << 8;
+
+            // Bit4 is HADR bit 16, but given the amount of RAM that we have that should always be 0
+            if val.bit(4) {
+                unimplemented!("HADR bit16 set");
             }
+
+            decoder.dishxfrc = val & 0x80 != 0;
+        }
+        0x0e => {
+            debug!("HADR-L 0x{:02x}", val);
+            decoder.hadr &= 0xff00;
+            decoder.hadr |= u16::from(val);
+        }
+        0x0f => {
+            debug!("HADR-M 0x{:02x}", val);
+            decoder.hadr &= 0xff;
+            decoder.hadr |= u16::from(val) << 8;
         }
         0x10 => {
             debug!("DADRC-L 0x{:02x}", val);
@@ -474,6 +506,28 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
         (2, 0) => decoder.push_param(v),
         // HINTMSK
         (2, 1) => decoder.hintmsk = v & 0x1f,
+        // HCHPCTL
+        (3, 0) => {
+            if v.bit(5) {
+                unimplemented!("HCHPCTL SMEN");
+            }
+
+            if v.bit(6) {
+                unimplemented!("HCHPCTL BFWR");
+            }
+
+            if v.bit(7) {
+                // Start read
+                if decoder.dishxfrc {
+                    warn!("Decoder read attempt with DISHXFRC");
+                    // Not sure what happens here exactly
+                    decoder.hxfrc = 0;
+                } else {
+                    decoder.hxfrc = decoder.hxfr;
+                    debug!("Host DMA read started {}", decoder.hxfrc);
+                }
+            }
+        }
         // HCLRCTL
         (3, 1) => {
             if v & 0x80 != 0 {
@@ -508,12 +562,53 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
         // RESULT
         (1, _) => {
             assert!(!decoder.host_result.is_empty());
-            decoder.host_result.pop()
+            let result = decoder.host_result.pop();
+
+            if decoder.host_result.is_empty() {
+                // This is not actually used by the firmware, the handler is a nop.
+                decoder.irq.trigger(Irq::RsltEmpt);
+            }
+
+            result
         }
+        // HINTMSK
+        (3, 0) => decoder.hintmsk,
         // HINTSTS
         (3, 1) => decoder.hintsts,
         _ => todo!("Host read @ {}:{}", addr, decoder.ra),
     }
+}
+
+pub fn host_dma_read(cdc: &mut Cdc) -> u8 {
+    let decoder = &mut cdc.decoder;
+
+    let data = decoder.ram[usize::from(decoder.hadr)];
+
+    match decoder.hxfrc {
+        0 => {
+            // It seems that on the real hardware when one attempts to read the RX data register
+            // while BFRD is low it returns always the same bytes which seems to be located at the
+            // *closest* multiple of 8 bytes. I think there's an 8byte buffer behind this register
+            // somewhere.
+            //
+            // I also observe that if I wait too long and a new sector gets read while I'm in the
+            // middle of the previous one I can still read the previous sector data up to the next
+            // 8byte boundary (need to make more intensive checks). Not that it should matter
+            // anyway, it's still garbage as far as the software is concerned.
+            warn!("DMA read with HXFRC 0");
+        }
+        1 => {
+            decoder.hxfrc = 0;
+            decoder.hadr += 1;
+            decoder.irq.trigger(Irq::HDMACmp);
+        }
+        n => {
+            decoder.hxfrc = n - 1;
+            decoder.hadr += 1;
+        }
+    }
+
+    data
 }
 
 pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {

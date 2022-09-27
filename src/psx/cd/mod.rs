@@ -51,8 +51,15 @@ impl CdInterface {
 }
 
 /// Called by the DMA when it wants to get our CD data
-pub fn dma_load(_psx: &mut Psx) -> u32 {
-    todo!()
+pub fn dma_load(psx: &mut Psx) -> u32 {
+    // We read 4 bytes at a time
+    let b0 = u32::from(psx.cd.cdc.host_dma_read());
+    let b1 = u32::from(psx.cd.cdc.host_dma_read());
+    let b2 = u32::from(psx.cd.cdc.host_dma_read());
+    let b3 = u32::from(psx.cd.cdc.host_dma_read());
+
+    // Pack in a little endian word
+    b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
 pub fn run_audio_cycle(psx: &mut Psx, _mode: CycleMode) -> (i16, i16) {
