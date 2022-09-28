@@ -533,9 +533,6 @@ pub fn serial_latch(cdc: &mut Cdc) {
                 let tm = (cmd >> 16) as u8;
                 cdc.dsp.tracking_mode = tm;
 
-                // XXX we need to implement tracking mode off, reverse sled to emulate the sequence
-                // used to reset the sled to the start of the disc
-
                 match (tm >> 2) & 3 {
                     0 => debug!("Tracking servo OFF"),
                     1 => debug!("Tracking servo ON"),
@@ -681,7 +678,9 @@ pub fn serial_latch(cdc: &mut Cdc) {
                     // There's a bunch of different values in this register configuring low level
                     // things we (probably) don't care about
                     0x3b => debug!("Operation for MIRR/DFCT/FOK: 0x{:03x}", (cmd >> 4) & 0xfff),
-                    // "Others"
+                    0x3c => debug!("TZC for COUT SLCT HPTZC"),
+                    0x3d => debug!("TZC for COUT SLCT DTZC"),
+                    0x3e => debug!("Filter: 0x{:04x}", cmd & 0xffff),
                     0x3f => debug!("Others: 0x{:04x}", cmd & 0xffff),
                     sel => unimplemented!("SELECT 0x{:02x}", sel),
                 }

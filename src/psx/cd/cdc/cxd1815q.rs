@@ -39,16 +39,22 @@ pub struct Decoder {
     shdr: HdrBuf,
     /// ECC status register
     eccsts: u8,
+    /// Host interrupt status
+    hintsts: u8,
+    /// Host interrupt mask
+    hintmsk: u8,
+    /// Attenuation value 0 to 3
+    atv: [u8; 4],
+    /// Attenuation value 0 to 3 (pending application through ADPCTL)
+    atv_pending: [u8; 4],
+    /// Real-time coding information
+    rtci: u8,
     /// RAM used to store decoded sectors
     ram: [u8; 32 * 1024],
     /// Host command parameter FIFO
     host_params: HostFifo,
     /// Host command response FIFO
     host_result: HostFifo,
-    /// Host interrupt status
-    hintsts: u8,
-    /// Host interrupt mask
-    hintmsk: u8,
 }
 
 impl Decoder {
@@ -72,11 +78,16 @@ impl Decoder {
             hdr: HdrBuf::new(),
             shdr: HdrBuf::new(),
             eccsts: 0,
+            hintsts: 0,
+            // Datasheet says that all write registers are 0x00 at reset, except for this one that
+            // has the HCRISD set
+            hintmsk: 1,
+            atv: [0; 4],
+            atv_pending: [0; 4],
+            rtci: 0,
             ram: [0; 32 * 1024],
             host_params: HostFifo::new(),
             host_result: HostFifo::new(),
-            hintsts: 0,
-            hintmsk: 0,
         }
     }
 
@@ -339,9 +350,13 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
 
                     cdc.decoder.cmadr = (addr >> 10) as u8;
 
-                    // XXX For CD-DA mode do we also drop the first 12 bytes? If not, how does this
-                    // play with ENDLADR, since it assumes 0x923B sectors?
-                    for &b in &raw_data[12..] {
+                    // XXX Not sure if this is accurate. Surely it wouldn't make sense to drop 12
+                    // bytes from audio sectors? On the other hand I don't think that CD-DA
+                    // playback goes through RAM, the DSP is probably just fed directly (the block
+                    // diagram in the datasheet also seems to confirm that).
+                    let sector_off = if mode == DecoderMode::CdDa { 0 } else { 12 };
+
+                    for &b in &raw_data[sector_off..] {
                         if cdc.decoder.write_stopped {
                             break;
                         }
@@ -498,6 +513,8 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             }
         }
         0x17 => decoder.push_result(val),
+        0x19 => debug!("ADPMNT 0x{:02x}", val),
+        0x1b => decoder.rtci = val,
         _ => unimplemented!("sub CPU write 0x{:02x} @ 0x{:02x}", val, addr),
     }
 
@@ -564,6 +581,24 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
             let to_ack = v & 0x1f;
 
             decoder.hintsts &= !to_ack;
+        }
+        // ATV0
+        (2, 2) => decoder.atv_pending[0] = v,
+        // ATV1
+        (3, 2) => decoder.atv_pending[1] = v,
+        // ATV2
+        (1, 3) => decoder.atv_pending[2] = v,
+        // ATV3
+        (2, 3) => decoder.atv_pending[3] = v,
+        // ADPCTL
+        (3, 3) => {
+            if v.bit(5) {
+                decoder.atv = decoder.atv_pending;
+            }
+
+            if v.bit(0) {
+                unimplemented!("ADPMUTE");
+            }
         }
         _ => todo!("Host write 0x{:02x} @ {}:{}", v, addr, decoder.ra),
     }

@@ -478,6 +478,24 @@ fn op_mul(cdc: &mut Cdc) {
     cdc.uc.half_carry = false;
 }
 
+/// Logical shift right
+fn op_lsr<M>(cdc: &mut Cdc)
+where
+    M: AddressingMode,
+{
+    let addr = M::get_addr(cdc);
+
+    let v = super::load(cdc, addr);
+
+    let r = v >> 1;
+
+    super::store(cdc, addr, r);
+
+    cdc.uc.carry = (v & 1) != 0;
+    cdc.uc.negative = false;
+    cdc.uc.zero = r == 0;
+}
+
 /// Logical shift right accumulator
 fn op_lsra(cdc: &mut Cdc) {
     let v = cdc.uc.a;
@@ -486,7 +504,7 @@ fn op_lsra(cdc: &mut Cdc) {
 
     cdc.uc.carry = (v & 1) != 0;
     cdc.uc.negative = false;
-    cdc.uc.zero = (v >> 1) == 0;
+    cdc.uc.zero = cdc.uc.a == 0;
 }
 
 /// Clear byte
@@ -1119,8 +1137,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 0,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_lsr::<Dir>,
+        cycles: 5,
     },
     Instruction {
         handler: unimplemented,
