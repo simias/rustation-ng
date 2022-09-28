@@ -1,3 +1,5 @@
+//! CXD1815Q (similar to CXD1815Q) emulation
+
 use super::Cdc;
 use crate::bitwise::Bitwise;
 use cdimage::Sector;

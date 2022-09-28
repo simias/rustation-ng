@@ -1,3 +1,5 @@
+//! CXD2545Q DSP emulation
+
 use super::{us_to_audio_cycles, Cdc};
 use cdimage::{DiscPosition, Msf};
 use std::cmp::min;

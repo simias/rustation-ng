@@ -1,3 +1,5 @@
+//! NXP MC68HC05 microcontroller emulation
+
 mod instructions;
 
 use super::Cdc;

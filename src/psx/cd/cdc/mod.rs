@@ -1,15 +1,15 @@
-mod cxd1815q;
-mod cxd2545q;
-mod mc68hc05;
+mod decoder;
+mod dsp;
+mod uc;
 
 use super::Disc;
 use cdimage::Sector;
-pub use mc68hc05::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
+pub use uc::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
 pub struct Cdc {
-    uc: mc68hc05::Uc,
-    decoder: cxd1815q::Decoder,
-    dsp: cxd2545q::Dsp,
+    uc: uc::Uc,
+    decoder: decoder::Decoder,
+    dsp: dsp::Dsp,
     date: u32,
     disc: Option<Disc>,
 }
@@ -17,9 +17,9 @@ pub struct Cdc {
 impl Cdc {
     pub fn new(mc68hc05_rom: &[u8; MC68HC05_ROM_DUMP_SIZE], disc: Option<Disc>) -> Cdc {
         let mut cdc = Cdc {
-            uc: mc68hc05::Uc::new(mc68hc05_rom),
-            decoder: cxd1815q::Decoder::new(),
-            dsp: cxd2545q::Dsp::new(),
+            uc: uc::Uc::new(mc68hc05_rom),
+            decoder: decoder::Decoder::new(),
+            dsp: dsp::Dsp::new(),
             date: 0,
             disc,
         };
@@ -31,7 +31,7 @@ impl Cdc {
         // back to the center (polling LMSW) but this way I make sure that this is emulated
         // correctly and we won't freeze or crash if a game decides to reset the drive later.
         let position = "+05:00:00".parse().expect("Bad starting position");
-        cxd2545q::set_position(&mut cdc, position);
+        dsp::set_position(&mut cdc, position);
 
         cdc
     }
@@ -46,9 +46,9 @@ impl Cdc {
         // these chips run at several MHz) but given that most events have mechanical constraints
         // that shouldn't really matter since the average jitter is generally well beyond the
         // precision granted by this method.
-        mc68hc05::run_audio_cycle(self);
-        cxd2545q::run_audio_cycle(self);
-        cxd1815q::run_audio_cycle(self);
+        uc::run_audio_cycle(self);
+        dsp::run_audio_cycle(self);
+        decoder::run_audio_cycle(self);
 
         self.date += 1;
 
@@ -59,17 +59,17 @@ impl Cdc {
 
     /// Writes coming from the host CPU (the main MIPS CPU)
     pub fn host_write(&mut self, addr: u8, v: u8) {
-        cxd1815q::host_write(self, addr, v);
+        decoder::host_write(self, addr, v);
     }
 
     /// Reads coming from the host CPU (the main MIPS CPU)
     pub fn host_read(&mut self, addr: u8) -> u8 {
-        cxd1815q::host_read(self, addr)
+        decoder::host_read(self, addr)
     }
 
     /// DMA (sector data) reads coming from the host CPU (the main MIPS CPU)
     pub fn host_dma_read(&mut self) -> u8 {
-        cxd1815q::host_dma_read(self)
+        decoder::host_dma_read(self)
     }
 
     /// Returns true if one of the host interrupts is currently active
@@ -88,38 +88,38 @@ impl Cdc {
     /// Called when the microcontroller writes to the CXD1815Q's sub-CPU bus (pins A0-A4, D0-D7,
     /// XCS, XWR)
     fn decoder_write(&mut self, addr: u8, val: u8) {
-        cxd1815q::sub_cpu_write(self, addr, val);
+        decoder::sub_cpu_write(self, addr, val);
     }
 
     /// Called when the microcontroller reads from CXD1815Q's sub-CPU bus (pins A0-A4, D0-D7, XCS,
     /// XRD)
     fn decoder_read(&mut self, addr: u8) -> u8 {
-        cxd1815q::sub_cpu_read(self, addr)
+        decoder::sub_cpu_read(self, addr)
     }
 
     /// Called when the controller ticks the serial clock of the CXD2545Q's serial input
     fn dsp_serial_tick(&mut self, data: bool) {
-        cxd2545q::serial_tick(self, data)
+        dsp::serial_tick(self, data)
     }
 
     /// Called when the controller latches a command sent to the CXD2545Q's serial input.
     fn dsp_serial_latch(&mut self) {
-        cxd2545q::serial_latch(self)
+        dsp::serial_latch(self)
     }
 
     /// Called when the controller ticks the SCLK signal of the CXD2545Q
     fn dsp_sclk_tick(&mut self) {
-        cxd2545q::sclk_tick(self)
+        dsp::sclk_tick(self)
     }
 
     /// Called when the controller ticks the SQCK signal of the CXD2545Q
     fn dsp_sqck_tick(&mut self) {
-        cxd2545q::sqck_tick(self)
+        dsp::sqck_tick(self)
     }
 
     /// Called when the DSP reads a new sector
     fn dsp_sector_read(&mut self, sector: Sector) {
-        cxd1815q::dsp_sector_read(self, sector);
+        decoder::dsp_sector_read(self, sector);
     }
 }
 
