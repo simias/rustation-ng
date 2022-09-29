@@ -1,6 +1,7 @@
 //! CXD2545Q DSP emulation
 
 use super::{us_to_audio_cycles, Cdc};
+use crate::bitwise::Bitwise;
 use cdimage::{DiscPosition, Msf};
 use std::cmp::min;
 
@@ -111,7 +112,8 @@ impl Dsp {
 
     // Command 0x9: Function specification
     fn set_function_specification(&mut self, v: u8) {
-        self.aseq = v & 0x20 != 0;
+        self.dspb = v.bit(6);
+        self.aseq = v.bit(5);
     }
 
     /// Returns the value of the GFS signal (high when frame sync and the insertion protection

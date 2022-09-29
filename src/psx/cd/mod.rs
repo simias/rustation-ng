@@ -62,11 +62,11 @@ pub fn dma_load(psx: &mut Psx) -> u32 {
     b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 }
 
-pub fn run_audio_cycle(psx: &mut Psx, _mode: CycleMode) -> (i16, i16) {
-    psx.cd.cdc.run_audio_cycle();
+pub fn run_audio_cycle(psx: &mut Psx) -> [i16; 2] {
+    let sample = psx.cd.cdc.run_audio_cycle();
     refresh_irq(psx);
 
-    (0, 0)
+    sample
 }
 
 pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
@@ -94,14 +94,6 @@ fn refresh_irq(psx: &mut Psx) {
     }
 
     psx.cd.irq_active = irq;
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum CycleMode {
-    /// The SPU doesn't use the CD audio samples at the moment, so we can skip resampling/mixing
-    Muted,
-    /// The SPU uses the CD audio samples and they must be resampled and mixed
-    Audio,
 }
 
 /// This is the SHA256 for the firmware we tested with, `scph-5502_SC430939.bin`.

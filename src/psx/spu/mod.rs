@@ -300,13 +300,11 @@ fn run_cycle(psx: &mut Psx) {
         right_mix = 0;
     }
 
-    if psx.spu.cd_audio_enabled() {
-        let (cd_left, cd_right) = cd::run_audio_cycle(psx, cd::CycleMode::Audio);
+    let [cd_left, cd_right] = cd::run_audio_cycle(psx);
 
+    if psx.spu.cd_audio_enabled() {
         left_mix += i32::from(cd_left);
         right_mix += i32::from(cd_right);
-    } else {
-        cd::run_audio_cycle(psx, cd::CycleMode::Muted);
     }
 
     left_mix = saturate_to_i16(left_mix) as i32;

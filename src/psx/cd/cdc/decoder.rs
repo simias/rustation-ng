@@ -1,7 +1,8 @@
 //! CXD1815Q (similar to CXD1815Q) emulation
 
-use super::Cdc;
+use super::{resampler::AudioResampler, Cdc};
 use crate::bitwise::Bitwise;
+use cdimage::sector::{XaBitsPerSample, XaCodingAudio, XaSamplingFreq};
 use cdimage::Sector;
 use std::fmt;
 
@@ -50,13 +51,31 @@ pub struct Decoder {
     /// Attenuation value 0 to 3 (pending application through ADPCTL)
     atv_pending: [u8; 4],
     /// Real-time coding information
-    rtci: u8,
+    rtci: XaCodingAudio,
+    /// ADPMUTE
+    adp_mute: bool,
+    /// Real-time ADPCM playback mute
+    rt_mute: bool,
+    /// Counter until ADPBUSY goes low (in audio cycles)
+    adpcm_busy_counter: u16,
+    /// The last two previously decoded ADPCM samples for the left and right channels
+    adpcm_last: [[i16; 2]; 2],
+    /// Current phase for audio resampling, in 1/7th of a sample. We need this because the XA ADPCM
+    /// streams have a frequency of 37.8kHz or 18.9kHz, respectively 6/7 and 3/7 the CD-DA audio
+    /// frequency of 44.1kHz
+    adpcm_audio_phase: u8,
+    /// Temporary buffer holding decoded samples before 44.1kHz resampling
+    sample_buffer: [[i16; 2]; 4032],
+    /// Two resamplers for the left and right stereo channels
+    resamplers: [AudioResampler; 2],
     /// RAM used to store decoded sectors
     ram: [u8; 32 * 1024],
     /// Host command parameter FIFO
     host_params: HostFifo,
     /// Host command response FIFO
     host_result: HostFifo,
+    /// Buffer for output samples before they're sent to the SPU
+    output_buffer: OutputBuffer,
 }
 
 impl Decoder {
@@ -86,10 +105,18 @@ impl Decoder {
             hintmsk: 1,
             atv: [0; 4],
             atv_pending: [0; 4],
-            rtci: 0,
+            rtci: XaCodingAudio(0),
+            adp_mute: false,
+            rt_mute: false,
+            adpcm_busy_counter: 0,
+            adpcm_last: [[0; 2]; 2],
+            adpcm_audio_phase: 0,
+            sample_buffer: [[0; 2]; 4032],
+            resamplers: [AudioResampler::new(), AudioResampler::new()],
             ram: [0; 32 * 1024],
             host_params: HostFifo::new(),
             host_result: HostFifo::new(),
+            output_buffer: OutputBuffer::new(),
         }
     }
 
@@ -181,9 +208,255 @@ impl Decoder {
 
         self.host_result.push(r);
     }
+
+    pub fn adpcm_decode_sector(&mut self, sector_addr: u16) {
+        // Data starts after the header + subheader
+        let data_start = usize::from(sector_addr + 4 + 8);
+
+        // Each sector contains an "audio block" of 2304B and 20B of padding (that should be 0) for
+        // a total of 2324 bytes (the length of an XA Form2 payload)
+        let data = &self.ram[data_start..(data_start + 2304)];
+
+        let shift_4bpp = match self.rtci.bits_per_sample() {
+            XaBitsPerSample::S4Bits => 1,
+            XaBitsPerSample::S8Bits => 0,
+        };
+
+        let units_per_group = 4 << shift_4bpp;
+        let samples_8bpp = shift_4bpp == 0;
+
+        let stereo = self.rtci.stereo();
+
+        // Total number of samples we're about to decode
+        let total_samples = 18 * (4 << shift_4bpp) * 28;
+
+        // 1 for stereo, 0 for mono
+        let stereo_one = stereo as usize;
+
+        // Number of generated stereo samples
+        let stereo_samples = if stereo {
+            total_samples / 2
+        } else {
+            total_samples
+        };
+
+        let audio_frequency = match self.rtci.sampling_frequency() {
+            XaSamplingFreq::F18_9 => {
+                // Sampling frequency is 18.9kHz, 3/7 * 44.1kHz
+                AudioFrequency::Xa18k9
+            }
+            XaSamplingFreq::F37_8 => {
+                // Sampling frequency is 37.8kHz, 6/7 * 44.1kHz
+                AudioFrequency::Xa37k8
+            }
+        };
+
+        if self.rt_mute || self.adp_mute {
+            for s in self.sample_buffer[0..usize::from(stereo_samples)].iter_mut() {
+                *s = [0, 0];
+            }
+        } else {
+            // Offsets in the output buffer, per channel
+            let mut output_offsets = [0; 2];
+
+            // Each audio block contains 18 "sound groups" of 128 bytes
+            for group in 0..18 {
+                let group_off = 128 * group;
+                // Each group has a 16 byte "Sound Parameters" header...
+                let sp = &data[group_off..group_off + 16];
+                // ... and 112 bytes of "Sample Audio Data"
+                let audio_data = &data[group_off + 16..group_off + 128];
+
+                // Each group has between 4 and 8 "Sound Units" depenting on the sample bit depth
+                for unit in 0..units_per_group {
+                    // The params are stored twice, the second time at the same address | 4
+                    let param = sp[((unit << 1) & 8) | (unit & 3)];
+                    let shift = param & 0xf;
+                    let weights: [(i32, i32); 16] = [
+                        (0, 0),
+                        (60, 0),
+                        (115, -52),
+                        (98, -55),
+                        (122, -60),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                        (0, 0),
+                    ];
+                    let (wp, wn) = weights[(param >> 4) as usize];
+
+                    let channel = unit & stereo_one;
+
+                    for i in 0..28 {
+                        let encoded = if samples_8bpp {
+                            audio_data[(i << 2) | unit]
+                        } else {
+                            // 4bpp: 2 samples per byte
+                            let s = audio_data[(i << 2) | (unit >> 1)];
+
+                            // Convert the sample to 8 bit by setting the low 4 bits to 0
+                            if unit & 1 == 0 {
+                                s << 4
+                            } else {
+                                s & 0xf0
+                            }
+                        };
+
+                        // Convert to signed 16 bits
+                        let sample = (u16::from(encoded) << 8) as i16;
+                        // Convert to 32bits to handle overflows
+                        let mut sample = i32::from(sample);
+
+                        // ADPCM decode
+                        sample >>= shift;
+                        let sample_1 = i32::from(self.adpcm_last[channel][0]);
+                        let sample_2 = i32::from(self.adpcm_last[channel][1]);
+                        sample += (sample_1 * wp + sample_2 * wn) >> 6;
+
+                        // Saturate to 16 bits
+                        let sample = if sample > i16::max_value() as i32 {
+                            i16::max_value()
+                        } else if sample < i16::min_value() as i32 {
+                            i16::min_value()
+                        } else {
+                            sample as i16
+                        };
+
+                        // Rotate last samples
+                        self.adpcm_last[channel][1] = self.adpcm_last[channel][0];
+                        self.adpcm_last[channel][0] = sample;
+
+                        // Store the data in the output buffer
+                        let sample_off = output_offsets[channel];
+                        self.sample_buffer[sample_off][channel] = sample;
+                        output_offsets[channel] += 1;
+                    }
+                }
+            }
+        }
+
+        let nsamples = self.resample_44100(stereo_samples, stereo, audio_frequency);
+
+        // XXX Not sure about this, I assume that the ADPBUSY flag remains high as long as the last
+        // decoded sample hasn't been output to the SPU, but maybe instead the decoding is batched
+        // and buffered somewhere?
+        self.adpcm_busy_counter = nsamples;
+    }
+
+    /// Resample `sample_count` samples from `self.sample_buffer` from `frequency` to 44.1kHz and
+    /// queue them for output to the SPU. Also applies the ATV.
+    ///
+    /// Returns the number of 44.1kHz samples generated.
+    fn resample_44100(
+        &mut self,
+        sample_count: u16,
+        stereo: bool,
+        frequency: AudioFrequency,
+    ) -> u16 {
+        let samples = &self.sample_buffer[..usize::from(sample_count)];
+        let mut nout_samples = 0;
+
+        let l_to_l = i32::from(self.atv[0]);
+        let l_to_r = i32::from(self.atv[1]);
+        let r_to_r = i32::from(self.atv[2]);
+        let r_to_l = i32::from(self.atv[3]);
+
+        let mix = move |[l, r]: [i16; 2]| -> [i16; 2] {
+            let l = i32::from(l);
+            let r = i32::from(r);
+
+            let l = (l * l_to_l + r * r_to_l) >> 7;
+            let r = (r * l_to_r + r * r_to_r) >> 7;
+
+            let l = if l >= i32::from(i16::MAX) {
+                i16::MAX
+            } else if l <= i32::from(i16::MIN) {
+                i16::MIN
+            } else {
+                l as i16
+            };
+
+            let r = if r >= i32::from(i16::MAX) {
+                i16::MAX
+            } else if r <= i32::from(i16::MIN) {
+                i16::MIN
+            } else {
+                r as i16
+            };
+
+            [l, r]
+        };
+
+        match frequency {
+            AudioFrequency::Da2x => {
+                // We're running at 2 * 44.1kHz, that means that we run at twice the SPU audio
+                // frequency and must skip every other sample.
+                //
+                // XXX Mednafen doesn't resample here, should we? Do games actually use this mode
+                // for some reason?
+                for &[l, r] in samples.iter().step_by(2) {
+                    self.output_buffer.push_sample_44100(mix([l, r]));
+                    nout_samples += 1;
+                }
+            }
+            AudioFrequency::Da1x => {
+                // We're running at 44.1kHz, in other words we're running at the normal CD-DA
+                // frequency and we don't have to resample
+                for &[l, r] in samples.iter() {
+                    self.output_buffer.push_sample_44100(mix([l, r]));
+                    nout_samples += 1;
+                }
+            }
+            AudioFrequency::Xa18k9 | AudioFrequency::Xa37k8 => {
+                // We're running at a fraction of 44.1kHz, we need to resample
+
+                // This value is the ratio of the audio frequency to the output frequency of
+                // 44.1kHz in multiples of 1/7th. So for instance for Xa37k8 the input frequency
+                // is 37.8kHz so phase step will be 6 because 37.8kHz = 6/7 * 44.1kHz
+                let phase_step = frequency as u8;
+
+                for &[l, r] in samples.iter() {
+                    while self.adpcm_audio_phase < 7 {
+                        let l = self.resamplers[0].resample(self.adpcm_audio_phase);
+                        let r = if stereo {
+                            self.resamplers[1].resample(self.adpcm_audio_phase)
+                        } else {
+                            l
+                        };
+                        self.adpcm_audio_phase += phase_step;
+
+                        self.output_buffer.push_sample_44100(mix([l, r]));
+                        nout_samples += 1;
+                    }
+
+                    self.adpcm_audio_phase -= 7;
+                    self.resamplers[0].push_sample(l);
+                    self.resamplers[1].push_sample(r);
+                }
+            }
+        }
+
+        nout_samples
+    }
 }
 
-pub fn run_audio_cycle(cdc: &mut Cdc) {
+pub fn run_audio_cycle(cdc: &mut Cdc) -> [i16; 2] {
+    match cdc.decoder.adpcm_busy_counter {
+        0 => (),
+        1 => {
+            cdc.decoder.adpcm_busy_counter = 0;
+            cdc.decoder.irq.trigger(Irq::RTADPEnd);
+        }
+        _ => cdc.decoder.adpcm_busy_counter -= 1,
+    }
+
     match cdc.decoder.state {
         DecoderState::Idle => (),
         DecoderState::SectorPending {
@@ -388,6 +661,8 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
             }
         }
     }
+
+    cdc.decoder.output_buffer.pop_sample_44100()
 }
 
 pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
@@ -515,8 +790,14 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             }
         }
         0x17 => decoder.push_result(val),
-        0x19 => debug!("ADPMNT 0x{:02x}", val),
-        0x1b => decoder.rtci = val,
+        0x19 => {
+            if val.bit(7) {
+                // RTADPEN
+                let addr = u16::from(val & 0x7f) << 10;
+                decoder.adpcm_decode_sector(addr);
+            }
+        }
+        0x1b => decoder.rtci = XaCodingAudio(val),
         _ => unimplemented!("sub CPU write 0x{:02x} @ 0x{:02x}", val, addr),
     }
 
@@ -598,9 +879,7 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
                 decoder.atv = decoder.atv_pending;
             }
 
-            if v.bit(0) {
-                unimplemented!("ADPMUTE");
-            }
+            decoder.adp_mute = v.bit(0);
         }
         _ => todo!("Host write 0x{:02x} @ {}:{}", v, addr, decoder.ra),
     }
@@ -686,6 +965,7 @@ pub fn sub_cpu_read(cdc: &mut Cdc, addr: u8) -> u8 {
         0x05 => cdc.decoder.cmadr,
         // INTSTS
         0x07 => decoder.irq.status,
+        // HIFSTS
         0x11 => decoder.hifsts(),
         // HSTPRM
         0x12 => {
@@ -945,8 +1225,6 @@ impl HostFifo {
     }
 
     pub fn pop(&mut self) -> u8 {
-        debug_assert!(!self.is_empty());
-
         let idx = (self.read_idx & 0xf) as usize;
 
         self.read_idx = self.read_idx.wrapping_add(1) & 0x1f;
@@ -977,4 +1255,118 @@ impl fmt::Debug for HostFifo {
 
         write!(f, "]")
     }
+}
+
+/// Possible frequencies for CD audio. The values are the ratio of the frequency to the standard
+/// 44.1kHz frequency in 1/7th of a sample.
+#[allow(dead_code)]
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum AudioFrequency {
+    /// CD-DA (normal CD audio) at 2x drive speed, 2 * 44.1kHz
+    #[allow(dead_code)]
+    Da2x = 14,
+    /// CD-DA (normal CD audio) at 1x drive speed. That's the usual frequency for audio tracks and
+    /// the frequency the PSX's SPU works with.
+    Da1x = 7,
+    /// Compressed CD-ROM XA ADPCM audio sector at 37.8kHz, that is 6/7 * 44.1kHz
+    Xa37k8 = 6,
+    /// Compressed CD-ROM XA ADPCM audio sector at 18.9kHz, that is 3/7 * 44.1kHz
+    Xa18k9 = 3,
+}
+
+/// Maximum number of samples in the output buffer.
+///
+/// Rationale for this value: the maximum number of resampled samples we can get out of a single sector are
+/// 9408 (for 4bpp mono 18.9kHz audio).
+///
+/// Since we have to deal with firmware jitter and the start delay it's important to have a few
+/// hundred cycles on top of this to deal with "early" sectors, so I just picked the next power of
+/// two which should be more than enough.
+///
+/// Note that for the OutputBuffer code to work, it *has* to be a power of two
+const OUTPUT_BUFFER_SIZE: usize = 16 * 1024;
+
+struct OutputBuffer {
+    /// Stereo samples circular buffer
+    samples: Box<[[i16; 2]; OUTPUT_BUFFER_SIZE]>,
+    /// Write pointer
+    write_idx: u16,
+    /// Read pointer
+    read_idx: u16,
+    /// Number of cycles to wait until we start output samples
+    start_delay: u16,
+}
+
+impl OutputBuffer {
+    pub fn new() -> OutputBuffer {
+        let samples = box_array![[0; 2]; OUTPUT_BUFFER_SIZE];
+
+        OutputBuffer {
+            samples,
+            write_idx: 0,
+            read_idx: 0,
+            start_delay: 0,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.write_idx == self.read_idx
+    }
+
+    fn is_full(&self) -> bool {
+        self.write_idx == self.read_idx ^ (OUTPUT_BUFFER_SIZE as u16)
+    }
+
+    fn push_sample_44100(&mut self, sample: [i16; 2]) {
+        if self.is_full() {
+            warn!("Decoder output buffer overflow");
+        } else {
+            let sz = OUTPUT_BUFFER_SIZE as u16;
+
+            let idx = (self.write_idx & (sz - 1)) as usize;
+
+            self.samples[idx] = sample;
+
+            self.write_idx = self.write_idx.wrapping_add(1) & ((sz << 1) - 1);
+        }
+    }
+
+    fn pop(&mut self) -> [i16; 2] {
+        debug_assert!(!self.is_empty());
+
+        let sz = OUTPUT_BUFFER_SIZE as u16;
+        let idx = (self.read_idx & (sz - 1)) as usize;
+        self.read_idx = self.read_idx.wrapping_add(1) & ((sz << 1) - 1);
+
+        self.samples[idx]
+    }
+
+    /// Must be called at 44100Hz
+    fn pop_sample_44100(&mut self) -> [i16; 2] {
+        // Rationale for start_delay:
+        //
+        // The emulator code will stream at precisely 75 or 150 (2x) sectors per second. However
+        // we only generate ADPCM samples when the emulated firmware triggers RTADPEN, so it will
+        // introduce some jitter between sectors. To avoid running out of samples, I add a bit of
+        // latency before we start streaming samples in order to have a bit of a buffer to deal
+        // with the jitter.
+        if self.is_empty() {
+            self.start_delay = 44_100 / 150;
+            [0, 0]
+        } else if self.start_delay == 0 {
+            self.pop()
+        } else {
+            self.start_delay -= 1;
+            [0, 0]
+        }
+    }
+}
+
+#[test]
+fn output_buffer_size_pow_2() {
+    assert_eq!(
+        (OUTPUT_BUFFER_SIZE - 1) ^ OUTPUT_BUFFER_SIZE,
+        0,
+        "OUTPUT_BUFFER_SIZE is not a power of two"
+    );
 }
