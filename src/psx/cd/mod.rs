@@ -16,7 +16,7 @@ pub struct CdInterface {
 }
 
 impl CdInterface {
-    pub fn new(disc: Option<Disc>, cdc_rom: [u8; CDC_ROM_SIZE]) -> Result<CdInterface> {
+    pub fn new(disc: Option<Disc>, mut cdc_rom: [u8; CDC_ROM_SIZE]) -> Result<CdInterface> {
         {
             let mut hasher = Sha256::new();
 
@@ -37,7 +37,15 @@ impl CdInterface {
             .unwrap_or(disc::Region::NorthAmerica);
 
         if region != disc::Region::Europe {
-            unimplemented!("Patch CDC firmware for {:?}", region);
+            info!("Patchng CDC firmware for {:?}", region);
+
+            // Patch the expected license string: SCEE for Europe (default in this ROM), SCEI for
+            // Japan, SCEA for America
+            cdc_rom[0x3ca4] = match region {
+                disc::Region::Europe => b'E',
+                disc::Region::Japan => b'I',
+                disc::Region::NorthAmerica => b'A',
+            };
         }
 
         let mut cdc = cdc::Cdc::new(&cdc_rom, disc);

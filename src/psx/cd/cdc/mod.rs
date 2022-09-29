@@ -11,8 +11,6 @@ pub struct Cdc {
     uc: uc::Uc,
     decoder: decoder::Decoder,
     dsp: dsp::Dsp,
-    date: u32,
-    date_last_sector: u32,
     disc: Option<Disc>,
 }
 
@@ -22,8 +20,6 @@ impl Cdc {
             uc: uc::Uc::new(mc68hc05_rom),
             decoder: decoder::Decoder::new(),
             dsp: dsp::Dsp::new(),
-            date: 0,
-            date_last_sector: 0,
             disc,
         };
 
@@ -51,12 +47,6 @@ impl Cdc {
         // precision granted by this method.
         uc::run_audio_cycle(self);
         dsp::run_audio_cycle(self);
-
-        self.date += 1;
-
-        if self.date % 44100 == 0 {
-            info!("SECOND {}", self.date / 44100);
-        }
 
         decoder::run_audio_cycle(self)
     }
@@ -123,11 +113,6 @@ impl Cdc {
 
     /// Called when the DSP reads a new sector
     fn dsp_sector_read(&mut self, sector: Sector) {
-        let d = self.date - self.date_last_sector;
-        self.date_last_sector = self.date;
-
-        debug!("SECTOR FREQ: {}", 44100/d);
-
         decoder::dsp_sector_read(self, sector);
     }
 }
