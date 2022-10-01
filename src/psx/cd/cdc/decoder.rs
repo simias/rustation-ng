@@ -26,6 +26,8 @@ pub struct Decoder {
     dladr: u16,
     /// Host address
     hadr: u16,
+    /// Host address counter
+    hadrc: u16,
     /// Host tranfer
     hxfr: u16,
     /// Host tranfer counter
@@ -95,6 +97,7 @@ impl Decoder {
             decctl: DecCtl(0),
             dladr: 0,
             hadr: 0,
+            hadrc: 0,
             hxfr: 0,
             hxfrc: 0,
             dishxfrc: false,
@@ -919,6 +922,8 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
 
             if v.bit(7) {
                 // Start read
+                decoder.hadrc = decoder.hadr;
+
                 if decoder.dishxfrc {
                     warn!("Decoder read attempt with DISHXFRC");
                     // Not sure what happens here exactly
@@ -1010,7 +1015,7 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
 pub fn host_dma_read(cdc: &mut Cdc) -> u8 {
     let decoder = &mut cdc.decoder;
 
-    let data = decoder.ram[usize::from(decoder.hadr)];
+    let data = decoder.ram[usize::from(decoder.hadrc)];
 
     match decoder.hxfrc {
         0 => {
@@ -1027,12 +1032,12 @@ pub fn host_dma_read(cdc: &mut Cdc) -> u8 {
         }
         1 => {
             decoder.hxfrc = 0;
-            decoder.hadr += 1;
+            decoder.hadrc += 1;
             decoder.irq.trigger(Irq::HDMACmp);
         }
         n => {
             decoder.hxfrc = n - 1;
-            decoder.hadr += 1;
+            decoder.hadrc += 1;
         }
     }
 
