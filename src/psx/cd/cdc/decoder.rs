@@ -109,7 +109,9 @@ impl Decoder {
             // Datasheet says that all write registers are 0x00 at reset, except for this one that
             // has the HCRISD set
             hintmsk: 1,
-            atv: [0; 4],
+            // The BIOS CD player doesn't set the volume and expects these reset values, so it's
+            // important to get them right
+            atv: [0x80, 0, 0x80, 0],
             atv_pending: [0; 4],
             rtci: XaCodingAudio(0),
             adp_mute: false,
@@ -1409,7 +1411,6 @@ impl OutputBuffer {
     }
 
     fn push_sample_44100(&mut self, sample: [i16; 2]) {
-        info!("Sample: {}, {}", sample[0], sample[1]);
         if self.is_full() {
             warn!("Decoder output buffer overflow");
         } else {
