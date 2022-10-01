@@ -596,14 +596,33 @@ where
     cdc.uc.zero = v == 0;
 }
 
+/// Subtract memory byte and carry bit from accumulator
+fn op_sbc<M>(cdc: &mut Cdc)
+where
+    M: ValueMode,
+{
+    let v = M::get_value(cdc) as u16;
+    let a = cdc.uc.a as u16;
+    let c = cdc.uc.carry as u16;
+
+    let r = a.wrapping_sub(v).wrapping_sub(c);
+
+    cdc.uc.negative = (r & 0x80) != 0;
+    cdc.uc.zero = (r & 0xff) == 0;
+    cdc.uc.carry = r & 0x100 != 0;
+    // According to the datasheet the halfcarry is not modified by this instruction (unlike adc)
+
+    cdc.uc.a = r as u8;
+}
+
 /// Subtract memory byte from accumulator
 fn op_sub<M>(cdc: &mut Cdc)
 where
     M: ValueMode,
 {
     let v = M::get_value(cdc) as u16;
-
     let a = cdc.uc.a as u16;
+
     let r = a.wrapping_sub(v);
 
     cdc.uc.negative = (r & 0x80) != 0;
@@ -1591,8 +1610,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 2,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Imm>,
+        cycles: 2,
     },
     Instruction {
         handler: op_cpx::<Imm>,
@@ -1657,8 +1676,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 3,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Dir>,
+        cycles: 3,
     },
     Instruction {
         handler: op_cpx::<Dir>,
@@ -1723,8 +1742,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Ext>,
+        cycles: 4,
     },
     Instruction {
         handler: op_cpx::<Ext>,
@@ -1789,8 +1808,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 5,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Ix2>,
+        cycles: 5,
     },
     Instruction {
         handler: op_cpx::<Ix2>,
@@ -1855,8 +1874,8 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
         cycles: 4,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Ix1>,
+        cycles: 4,
     },
     Instruction {
         handler: op_cpx::<Ix1>,
@@ -1918,19 +1937,19 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
     },
     Instruction {
         handler: op_cmp::<Ix>,
-        cycles: 4,
+        cycles: 3,
     },
     Instruction {
-        handler: unimplemented,
-        cycles: 0,
+        handler: op_sbc::<Ix>,
+        cycles: 3,
     },
     Instruction {
         handler: op_cpx::<Ix>,
-        cycles: 4,
+        cycles: 3,
     },
     Instruction {
         handler: op_and::<Ix>,
-        cycles: 4,
+        cycles: 3,
     },
     Instruction {
         handler: unimplemented,
@@ -1938,43 +1957,43 @@ pub static OPCODE_MAP: [Instruction; 0x100] = [
     },
     Instruction {
         handler: op_lda::<Ix>,
-        cycles: 4,
+        cycles: 3,
     },
     Instruction {
         handler: op_sta::<Ix>,
-        cycles: 5,
+        cycles: 4,
     },
     // 0xf8
     Instruction {
         handler: op_eor::<Ix>,
-        cycles: 4,
-    },
-    Instruction {
-        handler: op_adc::<Ix>,
-        cycles: 4,
-    },
-    Instruction {
-        handler: op_ora::<Ix>,
-        cycles: 4,
-    },
-    Instruction {
-        handler: op_add::<Ix>,
-        cycles: 4,
-    },
-    Instruction {
-        handler: op_jmp::<Ix>,
         cycles: 3,
     },
     Instruction {
+        handler: op_adc::<Ix>,
+        cycles: 3,
+    },
+    Instruction {
+        handler: op_ora::<Ix>,
+        cycles: 3,
+    },
+    Instruction {
+        handler: op_add::<Ix>,
+        cycles: 3,
+    },
+    Instruction {
+        handler: op_jmp::<Ix>,
+        cycles: 2,
+    },
+    Instruction {
         handler: op_jsr::<Ix>,
-        cycles: 6,
+        cycles: 5,
     },
     Instruction {
         handler: op_ldx::<Ix>,
-        cycles: 4,
+        cycles: 3,
     },
     Instruction {
         handler: op_stx::<Ix>,
-        cycles: 5,
+        cycles: 4,
     },
 ];
