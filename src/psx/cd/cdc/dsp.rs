@@ -66,6 +66,15 @@ pub struct Dsp {
     mode_setting: u16,
     /// Sled kick level 1, 2, 3 or 4
     sled_kick_level: u8,
+    /// Traverse monitor counter
+    traverse_monitor_counter: u16,
+    /// Value of COUT (used while traversing)
+    cout: bool,
+    /// Counter for the number of tracks traversed
+    cout_tracks: f32,
+    /// Current speed of the sled in tracks per audio cycle (positive if we're going forward,
+    /// negative if we're reverse. Set to 0 if we're tracking)
+    sled_speed: f32,
     /// Next sector to be read
     position: DiscPosition,
 }
@@ -98,6 +107,10 @@ impl Dsp {
             track_jump_count: 0x100,
             mode_setting: 0,
             sled_kick_level: 1,
+            traverse_monitor_counter: 256,
+            cout: true,
+            cout_tracks: 0.,
+            sled_speed: 0.,
             position: DiscPosition::ZERO,
         };
 
@@ -141,7 +154,7 @@ impl Dsp {
 
         // For now let's keep it simple: if we are focused and the spindle is in PLL mode, pretend
         // that GFS is locked
-        self.focus_ok && self.clvp_engaged
+        self.focus_ok && self.clvp_engaged && self.tracking_servo_enabled()
     }
 
     /// Returns true if the drive is in a state where sectors are being read
@@ -219,12 +232,17 @@ impl Dsp {
         self.tracking_mode & 3 != 0
     }
 
-    /// Returns true if the tracking mode is "Tracking servo OFF, Reverse sled move"
+    /// If tracking servo is off and the sled is moving forward or backward, returns the
+    /// direction.
     ///
     /// That's the mode used by the firmware to bring the sled back to the lead-in (polling LMSW)
-    /// at the start.
-    fn is_sled_reversing(&self) -> bool {
-        self.tracking_mode & 0b1111 == 0b0011
+    /// at the start, it's also used for long distance jumps (in conjunction with COUT)
+    fn is_sled_traversing(&self) -> Option<SledDirection> {
+        match self.tracking_mode & 0b1111 {
+            0b0010 => Some(SledDirection::Forward),
+            0b0011 => Some(SledDirection::Reverse),
+            _ => None,
+        }
     }
 }
 
@@ -273,22 +291,87 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
         }
     }
 
-    if cdc.dsp.is_sled_reversing() {
-        // I don't want to bother implementing the full sled mechanics so I just special case this
-        // one: in this mode the sled is reversing towards the center of the disc, usually used
-        // early in the boot sequence to bring the sled back into the lead-in
+    if cdc.dsp.tracking_servo_enabled() {
+        // We're tracking, no need to mess with the sled position
+        cdc.dsp.sled_speed = 0.;
+    } else {
+        // Max sled speed in tracks/audio cycle while seeking (tested with Final Fantasy VII PAL on
+        // an SCPH 7502).
         //
-        // I roughly measured the speed of the sled in this mode at about 35mm/s. That's about half
-        // a track every audio cycle. Of course in practice the speed won't be fully linear, but
-        // it's probably a good enough approximation.
-        let turns = cdc.dsp.position.disc_turns().unwrap() - 0.5;
+        // Measured by capturing the spindle rotation at 480fps and counting 24 rotations in 102
+        // frames which gives us around 113rotations per seconds. I started counting 4 rotations
+        // after the beginning of the seek and stopped 4 rotations before the end to only get the
+        // "cruising speed".
+        //
+        // If I counted the teeth correctly the gearing ratio is 12/775 from the spindle to the
+        // sled, and then one full rotation of the last gear moves the sled 30.8mm.
+        //
+        // Putting all of this together gives the following number.
+        const SLED_MAX_SPEED: f32 = 0.764;
+
+        // This one is trickier to estimate, using the 480fps footage I can see that the
+        // acceleration from 0 to the above value takes between 10 and 20 frames, which means
+        // between 900 and 1800 audio cycles.
+        //
+        // The firmware drives the sled in reverse during about 17/500 seconds when finishing a seek, or
+        // 1500 audio cycles. Since the sled doesn't appear to actually reverse when it does this,
+        // it means that the deceleration must take longer than this (but not too much, for the
+        // braking to be effective).
+        //
+        // With all that considered I settled on a value of 0.000_5 tracks per audio cycle squared,
+        // which gives 1528 audio cycles to fully accelerate/stop the sled.
+        const SLED_ACCELERATION: f32 = 0.000_5;
+
+        if let Some(dir) = cdc.dsp.is_sled_traversing() {
+            match dir {
+                SledDirection::Forward => {
+                    cdc.dsp.sled_speed += SLED_ACCELERATION;
+
+                    if cdc.dsp.sled_speed > SLED_MAX_SPEED {
+                        cdc.dsp.sled_speed = SLED_MAX_SPEED;
+                    }
+                }
+                SledDirection::Reverse => {
+                    cdc.dsp.sled_speed -= SLED_ACCELERATION;
+
+                    if cdc.dsp.sled_speed < -SLED_MAX_SPEED {
+                        cdc.dsp.sled_speed = -SLED_MAX_SPEED;
+                    }
+                }
+            };
+        } else {
+            // We're probably stopped, in this case we need to decelerate but probably much less
+            // rapidly. I actually have no idea what the correct value is here, I didn't measure
+            // it, but it shouldn't matter too much since the firmware issues a reverse command to
+            // actively brake after seeks anyway.
+            if cdc.dsp.sled_speed >= 0. {
+                cdc.dsp.sled_speed -= SLED_ACCELERATION / 10.;
+                if cdc.dsp.sled_speed < 0. {
+                    cdc.dsp.sled_speed = 0.;
+                }
+            } else {
+                cdc.dsp.sled_speed += SLED_ACCELERATION / 10.;
+                if cdc.dsp.sled_speed > 0. {
+                    cdc.dsp.sled_speed = 0.;
+                }
+            }
+        }
+
+        let turns = cdc.dsp.position.disc_turns().unwrap() + cdc.dsp.sled_speed;
 
         let new_pos = DiscPosition::from_turns(turns).unwrap();
 
         set_position(cdc, new_pos);
 
-        // I assume that we'll lose the focus when running this, although I haven't checked.
-        cdc.dsp.focus_ok = false;
+        cdc.dsp.cout_tracks += cdc.dsp.sled_speed.abs();
+
+        let tmc = cdc.dsp.traverse_monitor_counter as f32;
+
+        if cdc.dsp.cout_tracks >= tmc {
+            cdc.dsp.cout_tracks -= tmc;
+            cdc.dsp.cout = !cdc.dsp.cout;
+            update_sens(cdc);
+        }
     }
 
     check_sector_read(cdc);
@@ -540,7 +623,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
                 match (tm >> 2) & 3 {
                     0 => debug!("Tracking servo OFF"),
                     1 => debug!("Tracking servo ON"),
-                    2 => debug!("Forward track jump"),
+                    2 => unimplemented!("Forward track jump"),
                     3 => unimplemented!("Reverse track jump"),
                     _ => unreachable!(),
                 }
@@ -740,8 +823,18 @@ pub fn serial_latch(cdc: &mut Cdc) {
             }
             // Function specification
             0x9 => cdc.dsp.set_function_specification((cmd >> 12) as u8),
-            // Audio contlor
+            // Audio control
             0xa => debug!("DSP audio ctrl: 0x{:02x}", (cmd >> 12) & 0xff),
+            // Traverse monitor counter setting
+            0xb => {
+                cdc.dsp.traverse_monitor_counter = (cmd >> 4) as u16;
+                cdc.dsp.cout = true;
+                cdc.dsp.cout_tracks = 0.;
+                debug!(
+                    "DSP traverse monitor counter: {}",
+                    cdc.dsp.traverse_monitor_counter
+                );
+            }
             // Spindle servo coefficient setting
             0xc => debug!("Spindle servo coef 0x{:02x}", (cmd >> 12) & 0xff),
             // CLV CTRL
@@ -1086,7 +1179,7 @@ fn update_sens(cdc: &mut Cdc) {
             0x50..=0x5f => cdc.dsp.focus_ok,
             0xa0..=0xaf => cdc.dsp.gfs(),
             // COUT
-            0xc0..=0xcf => false,
+            0xc0..=0xcf => cdc.dsp.cout,
             // XXX implement the rest
             _ => false,
         }

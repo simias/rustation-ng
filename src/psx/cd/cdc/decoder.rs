@@ -124,7 +124,43 @@ impl Decoder {
         self.host_command = cmd;
         self.command_busy = true;
 
-        debug!("Host command 0x{:02x} {:?}", cmd, self.host_params);
+        const CMD_NAME: [&str; 0x1f] = [
+            "Err_0x00",
+            "Getstat",
+            "Setloc",
+            "Play",
+            "Forward",
+            "Backward",
+            "ReadN",
+            "MotorOn",
+            "Stop",
+            "Pause",
+            "Init",
+            "Mute",
+            "Demute",
+            "Setfilter",
+            "Setmode",
+            "Getparam",
+            "GetlocL",
+            "GetlocP",
+            "SetSession",
+            "GetTN",
+            "GetTD",
+            "SeekL",
+            "SeekP",
+            "Err_0x18",
+            "Err_0x19",
+            "Test",
+            "GetID",
+            "ReadS",
+            "Reset",
+            "GetQ",
+            "ReadTOC",
+        ];
+
+        let name = CMD_NAME.get(usize::from(cmd)).unwrap_or(&"Unknown");
+
+        debug!("Host command 0x{:02x} {} {:?}", cmd, name, self.host_params);
 
         self.irq.trigger(Irq::HstCmnd);
     }
