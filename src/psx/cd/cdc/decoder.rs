@@ -56,6 +56,12 @@ pub struct Decoder {
     adp_mute: bool,
     /// Real-time ADPCM playback mute
     rt_mute: bool,
+    /// CD-DA playback
+    cd_da: bool,
+    /// CD-DA mute
+    cd_da_mute: bool,
+    /// Double speed
+    dblspd: bool,
     /// Counter until ADPBUSY goes low (in audio cycles)
     adpcm_busy_counter: u16,
     /// The last two previously decoded ADPCM samples for the left and right channels
@@ -108,6 +114,9 @@ impl Decoder {
             rtci: XaCodingAudio(0),
             adp_mute: false,
             rt_mute: false,
+            cd_da: false,
+            cd_da_mute: false,
+            dblspd: false,
             adpcm_busy_counter: 0,
             adpcm_last: [[0; 2]; 2],
             adpcm_audio_phase: 0,
@@ -691,6 +700,44 @@ pub fn run_audio_cycle(cdc: &mut Cdc) -> [i16; 2] {
 
                     cdc.decoder.dadrc = addr;
                 }
+
+                if matches!(mode, DecoderMode::CdDa | DecoderMode::Disabled)
+                    && cdc.decoder.cd_da
+                    && !cdc.decoder.cd_da_mute
+                {
+                    // Send the sector to the SPU
+                    info!("PLAYBACK");
+                    let nsamples = raw_data.len() / 4;
+
+                    for (n, pair) in cdc.decoder.sample_buffer[0..nsamples]
+                        .iter_mut()
+                        .enumerate()
+                    {
+                        let raw_pos = n << 2;
+
+                        let left_lo = raw_data[raw_pos] as u16;
+                        let left_hi = raw_data[raw_pos + 1] as u16;
+                        let right_lo = raw_data[raw_pos + 2] as u16;
+                        let right_hi = raw_data[raw_pos + 3] as u16;
+
+                        let left = left_lo | (left_hi << 8);
+                        let right = right_lo | (right_hi << 8);
+
+                        pair[0] = left as i16;
+                        pair[1] = right as i16;
+                    }
+
+                    cdc.decoder.resample_44100(
+                        nsamples as u16,
+                        true,
+                        if cdc.decoder.dblspd {
+                            AudioFrequency::Da2x
+                        } else {
+                            AudioFrequency::Da1x
+                        },
+                    );
+                }
+
                 cdc.decoder.state = DecoderState::Idle;
 
                 refresh_irq(cdc);
@@ -748,7 +795,13 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             // XXX guess
             decoder.write_stopped = false;
         }
-        0x07 => debug!("CHPCTL 0x{:02x}", val),
+        0x07 => {
+            debug!("CHPCTL 0x{:02x}", val);
+            decoder.dblspd = val.bit(1);
+            decoder.cd_da = val.bit(4);
+            decoder.cd_da_mute = val.bit(5);
+            decoder.rt_mute = val.bit(6);
+        }
         0x09 => {
             if decoder.irq.mask != val {
                 debug!("INTMSK 0x{:02x}", val);
@@ -911,6 +964,7 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
         (2, 3) => decoder.atv_pending[3] = v,
         // ADPCTL
         (3, 3) => {
+            debug!("ADPCTL");
             if v.bit(5) {
                 decoder.atv = decoder.atv_pending;
             }
@@ -931,7 +985,7 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
         (0, _) => decoder.hsts(),
         // RESULT
         (1, _) => {
-            assert!(!decoder.host_result.is_empty());
+            // assert!(!decoder.host_result.is_empty());
             let result = decoder.host_result.pop();
 
             if decoder.host_result.is_empty() {
@@ -941,6 +995,8 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
 
             result
         }
+        // RDDATA
+        (2, _) => host_dma_read(cdc),
         // HINTMSK
         (3, 0) => decoder.hintmsk,
         // HINTSTS
@@ -1295,7 +1351,6 @@ impl fmt::Debug for HostFifo {
 
 /// Possible frequencies for CD audio. The values are the ratio of the frequency to the standard
 /// 44.1kHz frequency in 1/7th of a sample.
-#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum AudioFrequency {
     /// CD-DA (normal CD audio) at 2x drive speed, 2 * 44.1kHz
@@ -1354,6 +1409,7 @@ impl OutputBuffer {
     }
 
     fn push_sample_44100(&mut self, sample: [i16; 2]) {
+        info!("Sample: {}, {}", sample[0], sample[1]);
         if self.is_full() {
             warn!("Decoder output buffer overflow");
         } else {

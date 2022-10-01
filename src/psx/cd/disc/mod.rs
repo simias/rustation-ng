@@ -230,7 +230,7 @@ fn read_system_cnf(image: &mut CdCache) -> Result<Vec<u8>> {
 
     let system_cnf = dir.entry_by_name(b"SYSTEM.CNF;1")?;
 
-    // SYSTEM.CNF should be a small text file, 1MB should bb way more
+    // SYSTEM.CNF should be a small text file, 1MB should be way more
     // than necessary
     let len = system_cnf.extent_len();
 

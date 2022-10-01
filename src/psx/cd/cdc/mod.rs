@@ -16,10 +16,12 @@ pub struct Cdc {
 
 impl Cdc {
     pub fn new(mc68hc05_rom: &[u8; MC68HC05_ROM_DUMP_SIZE], disc: Option<Disc>) -> Cdc {
+        let region = disc.as_ref().map(|d| d.region());
+
         let mut cdc = Cdc {
             uc: uc::Uc::new(mc68hc05_rom),
             decoder: decoder::Decoder::new(),
-            dsp: dsp::Dsp::new(),
+            dsp: dsp::Dsp::new(region),
             disc,
         };
 

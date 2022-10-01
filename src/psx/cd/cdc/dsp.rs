@@ -2,6 +2,7 @@
 
 use super::{us_to_audio_cycles, Cdc};
 use crate::bitwise::Bitwise;
+use crate::psx::cd::disc::Region;
 use cdimage::{DiscPosition, Msf};
 use std::cmp::min;
 
@@ -80,7 +81,7 @@ pub struct Dsp {
 }
 
 impl Dsp {
-    pub fn new() -> Dsp {
+    pub fn new(region: Option<Region>) -> Dsp {
         let mut dsp = Dsp {
             state: State::Idle,
             command_sr: 0,
@@ -114,7 +115,7 @@ impl Dsp {
             position: DiscPosition::ZERO,
         };
 
-        dsp.build_scex_string();
+        dsp.build_scex_string(region);
 
         dsp
     }
@@ -173,8 +174,9 @@ impl Dsp {
         self.dspb
     }
 
-    /// Build the SCEx license string for the loaded disc.
-    fn build_scex_string(&mut self) {
+    /// Build the SCEx license string for the given region. If region is None we won't send a
+    /// license string (emulating normal CD-DA discs for instance).
+    fn build_scex_string(&mut self, region: Option<Region>) {
         // Start by setting the SCEx string to zero. That's the default level when nothing is
         // output.
         //
@@ -193,9 +195,14 @@ impl Dsp {
         };
 
         // The magic unlock sequence, SCEI for Japan, SCEA for America and SCEE for Europe
-        //
-        // XXX Handle other regions
-        let magic = [b'S', b'C', b'E', b'E'];
+        let magic = match region {
+            Some(Region::Japan) => [b'S', b'C', b'E', b'I'],
+            Some(Region::NorthAmerica) => [b'S', b'C', b'E', b'A'],
+            Some(Region::Europe) => [b'S', b'C', b'E', b'E'],
+            // I notice that there's a bit of seemingly random noise on the pin when playing CD-DA,
+            // so I just set a random bit here to simulate that
+            None => [0, 0, 0, 1],
+        };
 
         // Each byte is sent using an UART-like protocol: 8bits per byte, LSB-first, one start bit,
         // two stop bits, no parity.
@@ -467,6 +474,8 @@ fn read_sector(cdc: &mut Cdc) {
     // is apparently checked internally then discarded). Instead I'm not sure *what* they are,
     // maybe the "15-bit peak data" according to the datasheet, but in my test I keep reading
     // two alternating values: [0x9f, 0x7f] and [0xfc, 0xff]
+    //
+    // See mendafen's code: it does appear to me an audio peak value
     let msf = match cdc.dsp.position {
         DiscPosition::LeadIn(msf) => msf,
         DiscPosition::Program(msf) => msf,
@@ -1027,7 +1036,14 @@ fn track_jump_common(cdc: &mut Cdc) {
         || !cdc.dsp.tracking_servo_enabled()
         || !cdc.dsp.sled_servo_enabled()
     {
-        unimplemented!("Attempted to execute jump track with bad preconditions");
+        // When playing from a stopped condition the firmware appeans to issue a jump with
+        // focus_servo disabled. What should we do in this case?
+        warn!(
+            "Attempted to execute jump track with bad preconditions: {} {} {}",
+            cdc.dsp.focus_servo_enabled(),
+            cdc.dsp.tracking_servo_enabled(),
+            cdc.dsp.sled_servo_enabled()
+        );
     }
 }
 
@@ -1180,6 +1196,12 @@ fn update_sens(cdc: &mut Cdc) {
             0xa0..=0xaf => cdc.dsp.gfs(),
             // COUT
             0xc0..=0xcf => cdc.dsp.cout,
+            // /OV64
+            //
+            // Not sure about this one, and it seems to be used by the firmware at 2361 (apparently
+            // when stopping the disc). For now I assume that if we're not in CLVP the overflow
+            // will trigger.
+            0xe0..=0xef => cdc.dsp.clvp_engaged,
             // XXX implement the rest
             _ => false,
         }
