@@ -50,7 +50,7 @@ unsafe fn set_context(context: Box<dyn Context>) {
 }
 
 unsafe fn drop_context() {
-    Box::from_raw(STATIC_CONTEXT);
+    drop(Box::from_raw(STATIC_CONTEXT));
     STATIC_CONTEXT = &mut dummy::Context;
 }
 

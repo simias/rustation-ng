@@ -63,14 +63,7 @@ pub fn lookup_blob(binary: &[u8; BIOS_SIZE]) -> Option<&'static Metadata> {
 /// Attempt to find the metadata for the given BIOS SHA-256 hash. Returns None if this BIOS is not
 /// part of the database.
 pub fn lookup_sha256(sha256: &[u8; 32]) -> Option<&'static Metadata> {
-    for md in &DATABASE {
-        if md.sha256 == *sha256 {
-            // Found match
-            return Some(md);
-        }
-    }
-
-    None
+    DATABASE.iter().find(|md| md.sha256 == *sha256)
 }
 
 pub static DATABASE: [Metadata; 24] = [

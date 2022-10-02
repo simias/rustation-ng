@@ -506,7 +506,7 @@ enum State {
 
 impl State {
     fn is_busy(&self) -> bool {
-        matches!(self, State::Idle)
+        !matches!(self, State::Idle)
     }
 }
 
