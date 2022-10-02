@@ -182,9 +182,9 @@ impl Entry {
 
 #[derive(Error, Debug)]
 pub enum IsoError {
-    #[error("Cdimage access error")]
+    #[error("Cdimage access error: {0}")]
     CdError(#[from] CdError),
-    #[error("Cdimage access error")]
+    #[error("Cdimage access error: {0}")]
     CachedCdError(#[from] Arc<CdError>),
     #[error("Couldn't find the ISO9660 magic `CD0001`")]
     BadMagic,

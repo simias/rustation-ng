@@ -71,7 +71,7 @@ mod version {
 const SYSTEM_INFO: libretro::SystemInfo = libretro::SystemInfo {
     library_name: cstring!("rustation-ng"),
     library_version: version::VERSION_CSTR as *const _ as *const libc::c_char,
-    valid_extensions: cstring!("cue"),
+    valid_extensions: cstring!("cue,zip"),
     need_fullpath: false,
     block_extract: false,
 };
@@ -209,7 +209,11 @@ impl Context {
     }
 
     fn load_disc(disc: &Path) -> Result<psx::Psx> {
-        let image = Cue::new(disc)?;
+        let image = if disc.extension().and_then(|ext| ext.to_str()) == Some("cue") {
+            Cue::new(disc)
+        } else {
+            Cue::new_from_zip(disc)
+        }?;
 
         let disc = Disc::new(Box::new(image))?;
 
@@ -758,9 +762,13 @@ fn init_variables() {
 fn load_game(disc: PathBuf) -> Option<Box<dyn libretro::Context>> {
     info!("Loading {:?}", disc);
 
-    Context::new(&disc)
-        .ok()
-        .map(|c| Box::new(c) as Box<dyn libretro::Context>)
+    match Context::new(&disc) {
+        Ok(ctx) => Some(Box::new(ctx)),
+        Err(e) => {
+            error!("Couldn't build context: {}", e);
+            None
+        }
+    }
 }
 
 /// Libretro to PlayStation button mapping. Libretro's mapping is based on the SNES controller so

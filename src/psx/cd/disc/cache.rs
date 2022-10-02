@@ -3,7 +3,7 @@
 //! This cache tries to read sectors ahead of the emulator to avoid any I/O lockup
 
 use cdimage::sector::Sector;
-use cdimage::{DiscPosition, Msf};
+use cdimage::{DiscPosition};
 use cdimage::{Image, Toc};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
@@ -36,37 +36,17 @@ impl Cache {
             })
             .unwrap();
 
-        let mut cache = Cache {
+        Cache {
             reader,
             handle: Some(handle),
             toc,
-        };
-
-        cache.preload();
-
-        cache
+        }
     }
 
     fn reader(&self) -> (MutexGuard<Reader>, &Condvar) {
         let &(ref reader, ref cond) = &*self.reader;
 
         (reader.lock().unwrap(), cond)
-    }
-
-    /// Pre-load the beginning of every track to avoid stalling when they're accessed
-    fn preload(&mut self) {
-        let toc = self.toc.clone();
-        // Preload the first minute (assuming 1x) of each track
-        for t in toc.tracks() {
-            for msf in (0..(60 * 75)).map(|i| Msf::from_sector_index(i).unwrap()) {
-                match t.disc_position(msf) {
-                    Ok(dp) => {
-                        let _ = self.read_sector(dp);
-                    }
-                    _ => break,
-                }
-            }
-        }
     }
 
     pub fn read_sector(&mut self, dp: DiscPosition) -> CachedResult<Sector> {
