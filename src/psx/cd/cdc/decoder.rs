@@ -711,7 +711,6 @@ pub fn run_audio_cycle(cdc: &mut Cdc) -> [i16; 2] {
                     && !cdc.decoder.cd_da_mute
                 {
                     // Send the sector to the SPU
-                    info!("PLAYBACK");
                     let nsamples = raw_data.len() / 4;
 
                     for (n, pair) in cdc.decoder.sample_buffer[0..nsamples]
@@ -921,25 +920,31 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
             }
 
             if v.bit(7) {
-                // Start read
-                decoder.hadrc = decoder.hadr;
+                if decoder.hxfrc == 0 {
+                    // Start read
+                    decoder.hadrc = decoder.hadr;
 
-                if decoder.dishxfrc {
-                    warn!("Decoder read attempt with DISHXFRC");
-                    // Not sure what happens here exactly
-                    decoder.hxfrc = 0;
-                } else {
-                    decoder.hxfrc = decoder.hxfr;
-                    let madr = usize::from(decoder.hadr & 0x7c00);
-                    debug!(
-                        "Host DMA read started {} 0x{:04x} {:02x}:{:02x}:{:02x}",
-                        decoder.hxfrc,
-                        decoder.hadr,
-                        decoder.ram[madr],
-                        decoder.ram[madr + 1],
-                        decoder.ram[madr + 2],
-                    );
+                    if decoder.dishxfrc {
+                        warn!("Decoder read attempt with DISHXFRC");
+                        // Not sure what happens here exactly
+                        decoder.hxfrc = 0;
+                    } else {
+                        decoder.hxfrc = decoder.hxfr;
+                        let madr = usize::from(decoder.hadr & 0x7c00);
+                        debug!(
+                            "Host DMA read started {} 0x{:04x} {:02x}:{:02x}:{:02x}",
+                            decoder.hxfrc,
+                            decoder.hadr,
+                            decoder.ram[madr],
+                            decoder.ram[madr + 1],
+                            decoder.ram[madr + 2],
+                        );
+                    }
                 }
+            } else {
+                // BFRD to zero: force end of transfer
+                // XXX Will probably need tweaking if we ever implement BFWR
+                decoder.hxfrc = 0;
             }
         }
         // HCLRCTL

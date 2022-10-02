@@ -3,7 +3,7 @@
 //! This cache tries to read sectors ahead of the emulator to avoid any I/O lockup
 
 use cdimage::sector::Sector;
-use cdimage::{DiscPosition};
+use cdimage::DiscPosition;
 use cdimage::{Image, Toc};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
