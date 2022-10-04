@@ -44,8 +44,8 @@ impl CdInterface {
         if region != disc::Region::Europe {
             info!("Patchng CDC firmware for {:?}", region);
 
-            // Patch the expected license string: SCEE for Europe (default in this ROM), SCEI for
-            // Japan, SCEA for America
+            // Patch the expected license string: SCEE for Europe (default in this ROM, so no
+            // change), SCEI for Japan, SCEA for America
             cdc_rom[0x3ca4] = match region {
                 disc::Region::Europe => b'E',
                 disc::Region::Japan => b'I',
