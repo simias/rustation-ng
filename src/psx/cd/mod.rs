@@ -17,7 +17,12 @@ pub struct CdInterface {
 
 impl CdInterface {
     pub fn new(disc: Option<Disc>, mut cdc_rom: [u8; CDC_ROM_SIZE]) -> Result<CdInterface> {
-        {
+        if !cfg!(test) {
+            // Check that we get the expected firmware. Not all CDC firmware versions will be
+            // compatible with this code since there have been significant changes between
+            // revisions of the PSX hardware (a PSOne firmware almost certainly wouldn't work
+            // without tweaks for instance). As such for now I only support one single ROM from the
+            // SCPH-5502 (PAL) hardware and patch it below for other regions.
             let mut hasher = Sha256::new();
 
             hasher.input(&cdc_rom);

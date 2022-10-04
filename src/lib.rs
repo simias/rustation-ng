@@ -661,7 +661,7 @@ fn get_system_directory() -> Result<PathBuf> {
         // Maybe "."? I'd rather give an explicit error message instead.
         None => {
             let m = "The frontend didn't give us a system directory, no BIOS can be loaded";
-            return Err(PsxError::FrontendError(m.to_string()));
+            Err(PsxError::FrontendError(m.to_string()))
         }
     }
 }

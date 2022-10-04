@@ -21,9 +21,9 @@ glitchy and incomplete. Some notable features of this project are:
 * Entirely software renderer that runs in a separate thread for better
   performance.
 
-* Native support for 24bit rendering in software (actually at this point we
-  don't even support dithered 16bpp like the original hardware, but it will be
-  added eventually).
+* Native support for 24bit rendering in software.
+
+* Low-level CD controller emulation.
 
 * Multithreaded CD cache implementation to avoid performance problems caused by
   high-latency storage.
@@ -53,6 +53,9 @@ play your PlayStation games in BIN/CUE format. For instance using retroarch you
 can do:
 
     retroarch -L librustation_ng_retro.so my_game.cue
+
+ZIP archives containing bin/cue are also supported. If the archive contains
+several cue files only the first one (in archive order) will be used.
 
 ## Troubleshooting
 
@@ -107,3 +110,26 @@ Here you see the emulator iterating on every file in the directory, attempting
 to find a suitable BIOS. If the file doesn't have the right size, isn't found in
 the internal BIOS database or isn't the right region for the game, it's
 rejected.
+
+### CD Controller firmware
+
+Unlike most PSX emulators, Rustation-ng emulates the low-level details of the CD
+controller and needs an original firmware to run which is distinct from the
+usual BIOS files. More details on these firmwares (and how to dump them) can be
+found [on this psxdev.net forum thread](http://www.psxdev.net/forum/viewtopic.php?t=557).
+
+The emulator has been written and tested against the SCPH-5502 firmware
+(scph-5502_SC430939.bin) and is currently the only one supported. It's a PAL
+(European) console firmware but the emulator hotpatches it to support other
+regions as needed.
+
+This file must be stored in the system directory alongside the BIOS. Its name
+doesn't matter, the emulator will select it by size and SHA256 (similar to the
+BIOS selection process described above).
+
+#### scph-5502_SC430939.bin attributes
+
+| Size    | `16896B`                                                           |
+| SHA-256 | `bf590fbf6055f428138510b26a2f2006b7eab54ead48c1ddb1a1a5d2699242db` |
+| SHA-1   | `f23458d13a518616a8592b8ddd668c052bc9be5a`                         |
+| MD5     | `3a3b384c1c006e0cf4644a0daa202237`                                 |

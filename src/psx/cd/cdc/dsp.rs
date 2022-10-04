@@ -1076,7 +1076,7 @@ fn jump_delay(track_count: u32) -> u32 {
     // but it's probably a bit overkill
     match TRACK_JUMP_DELAY_TO_XBUSY
         .iter()
-        .position(|&(t, _d)| u32::from(t) >= track_count)
+        .position(|&(t, _d)| t >= track_count)
     {
         Some(0) => {
             // We're at the low bound

@@ -1097,7 +1097,7 @@ pub fn dsp_sector_read(cdc: &mut Cdc, sector: Sector) {
     // For now I decided to keep it simple and arbitrarily set the delay at 100 cycles all the
     // time, we can improve that later.
     cdc.decoder.state = DecoderState::SectorPending {
-        sector,
+        sector: Box::new(sector),
         decint_delay: 100,
     };
 }
@@ -1157,7 +1157,7 @@ enum DecoderState {
     Idle,
     /// A sector was received from the DSP
     SectorPending {
-        sector: Sector,
+        sector: Box<Sector>,
         decint_delay: u16,
     },
 }
@@ -1468,7 +1468,7 @@ impl OutputBuffer {
 #[test]
 fn output_buffer_size_pow_2() {
     assert_eq!(
-        (OUTPUT_BUFFER_SIZE - 1) ^ OUTPUT_BUFFER_SIZE,
+        (OUTPUT_BUFFER_SIZE - 1) & OUTPUT_BUFFER_SIZE,
         0,
         "OUTPUT_BUFFER_SIZE is not a power of two"
     );

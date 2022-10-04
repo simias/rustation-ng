@@ -876,9 +876,7 @@ struct Ix;
 
 impl AddressingMode for Ix {
     fn get_addr(cdc: &mut Cdc) -> u16 {
-        let x = cdc.uc.x as u16;
-
-        x
+        u16::from(cdc.uc.x)
     }
 }
 
@@ -887,8 +885,8 @@ struct Ix1;
 
 impl AddressingMode for Ix1 {
     fn get_addr(cdc: &mut Cdc) -> u16 {
-        let off = cdc.uc.pc_next() as u16;
-        let x = cdc.uc.x as u16;
+        let off = u16::from(cdc.uc.pc_next());
+        let x = u16::from(cdc.uc.x);
 
         off + x
     }
