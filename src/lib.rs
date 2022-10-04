@@ -72,8 +72,8 @@ const SYSTEM_INFO: libretro::SystemInfo = libretro::SystemInfo {
     library_name: cstring!("rustation-ng"),
     library_version: version::VERSION_CSTR as *const _ as *const libc::c_char,
     valid_extensions: cstring!("cue,zip"),
-    need_fullpath: false,
-    block_extract: false,
+    need_fullpath: true,
+    block_extract: true,
 };
 
 /// Emulation context containing the emulator state
