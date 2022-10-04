@@ -125,11 +125,11 @@ regions as needed.
 
 This file must be stored in the system directory alongside the BIOS. Its name
 doesn't matter, the emulator will select it by size and SHA256 (similar to the
-BIOS selection process described above).
+BIOS selection process described above).|
 
-#### scph-5502_SC430939.bin attributes
-
-| Size    | `16896B`                                                           |
+| | scph-5502_SC430939.bin |
+| ------ | ------ |
+| Size    | `16,896B`                                                           |
 | SHA-256 | `bf590fbf6055f428138510b26a2f2006b7eab54ead48c1ddb1a1a5d2699242db` |
 | SHA-1   | `f23458d13a518616a8592b8ddd668c052bc9be5a`                         |
 | MD5     | `3a3b384c1c006e0cf4644a0daa202237`                                 |
