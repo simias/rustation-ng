@@ -112,7 +112,7 @@ impl ShadingMode for Shaded {
 }
 
 /// A vertex's coordinates
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -693,7 +693,7 @@ fn cmd_vram_load(psx: &mut Psx) {
         psx.gpu.rasterizer.flush_command_buffer();
 
         // Let's not block waiting for the reply right now, instead set the frame to None so that
-        // we can hopefully a little bit longer before we have to stall for the other thread
+        // we can hopefully wait a little bit longer before we have to stall for the other thread
         psx.gpu.state = State::VRamLoad(None);
     }
 }

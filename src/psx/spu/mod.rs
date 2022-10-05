@@ -14,6 +14,7 @@ const SPUSYNC: sync::SyncToken = sync::SyncToken::Spu;
 /// Offset into the SPU internal ram
 type RamIndex = u32;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Spu {
     /// RAM index, used for read/writes using CPU or DMA.
     ram_index: RamIndex,
@@ -46,12 +47,15 @@ pub struct Spu {
     voice_looped: u32,
     /// Most of the SPU's register behave like a R/W RAM, so to simplify the emulation we just
     /// store most registers in a big buffer
+    #[serde(with = "serde_big_array::BigArray")]
     regs: [u16; 320],
     /// SPU internal RAM, 16bit wide
+    #[serde(with = "serde_big_array::BigArray")]
     ram: [u16; SPU_RAM_SIZE],
     /// Output audio buffer. Sent to the frontend after each frame, so should be large enough to
     /// store one frame worth of audio samples. Assuming a 50Hz refresh rate @ 44.1kHz that should
     /// be about ~1800 samples per frame at most.
+    #[serde(with = "serde_big_array::BigArray")]
     audio_buffer: [i16; 2048],
     /// Write pointer into the audio_buffer
     audio_buffer_index: u32,
@@ -714,6 +718,7 @@ fn check_for_irq(psx: &mut Psx, index: RamIndex) {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Voice {
     /// Voice volume left
     volume_left: Volume,
@@ -951,6 +956,7 @@ fn saturate_to_i16(v: i32) -> i16 {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Volume {
     level: i16,
     config: VolumeConfig,
@@ -1003,6 +1009,7 @@ impl Volume {
 }
 
 /// Volume configuration, either fixed or a sweep
+#[derive(serde::Serialize, serde::Deserialize)]
 enum VolumeConfig {
     /// Fixed volume
     Fixed(i16),
@@ -1011,6 +1018,7 @@ enum VolumeConfig {
 }
 
 /// Attack Decay Sustain Release envelope
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Adsr {
     state: AdsrState,
     /// Current audio level for this envelope
@@ -1133,7 +1141,8 @@ impl Adsr {
     }
 }
 
-/// Parameters used to
+/// Parameters used to configure an envelope function
+#[derive(serde::Serialize, serde::Deserialize)]
 struct EnvelopeParams {
     /// Base divider step value (how fast do we reach the next step).
     divider_step: u16,
@@ -1224,7 +1233,7 @@ impl EnvelopeParams {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 enum EnvelopeMode {
     /// Divider and Volume steps remain the same throughout
     Linear,
@@ -1236,7 +1245,7 @@ enum EnvelopeMode {
     Exponential,
 }
 
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct AdsrConfig(u32);
 
 impl AdsrConfig {
@@ -1344,7 +1353,7 @@ impl AdsrConfig {
 }
 
 /// Possible ADSR states
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 enum AdsrState {
     Attack,
     Decay,
@@ -1353,7 +1362,7 @@ enum AdsrState {
 }
 
 /// The first two bytes of a 16-byte ADPCM block
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct AdpcmHeader(u16);
 
 impl AdpcmHeader {

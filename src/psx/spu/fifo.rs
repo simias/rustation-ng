@@ -1,6 +1,7 @@
 use std::ops::Index;
 
 /// 16 sample FIFO used to store decoded audio samples
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct DecoderFifo {
     /// Sample buffer
     buffer: [i16; 16],

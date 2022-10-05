@@ -12,6 +12,7 @@ use super::cpu::RegisterIndex;
 use super::{cpu, irq, Psx};
 
 /// Coprocessor 0: System control
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Cop0 {
     /// Cop0 register 12: Status register
     sr: u32,

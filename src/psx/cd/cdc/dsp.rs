@@ -7,6 +7,7 @@ use cdimage::{DiscPosition, Msf};
 use std::cmp::min;
 
 /// CXD2545Q: DSP with built-in digital servo
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Dsp {
     state: State,
     /// Shift register for serial writes coming from the microcontroller (24 bits)
@@ -1269,6 +1270,7 @@ fn update_soct(cdc: &mut Cdc) {
     cdc.uc.set_dsp_subq(dsp.soct_sr & 1 != 0);
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum State {
     /// No event pending
     Idle,

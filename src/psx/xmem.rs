@@ -1,7 +1,13 @@
+//! Optimized data structure holding the parts of the PSX address space that can contain executable
+//! code.
+
 use super::bios::BIOS_SIZE;
-/// Optimized data structure holding the parts of the PSX address space that can contain executable
-/// code.
 use super::{cpu, AccessWidth, Addressable};
+use crate::box_array::BoxArray;
+use serde::de::{Deserialize, Deserializer};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
+use shaman::digest::Digest;
+use shaman::sha2::Sha256;
 
 /// This structure manages all executable portions of memory and offers fast lookup to speed up
 /// instruction fetches.
@@ -18,9 +24,11 @@ pub struct XMemory {
     /// * The BIOS page (the first 512KiB contain the BIOS, the rest is padded with 0xff)
     /// * The "bad" page that's filled with 0xff and used as placeholder for all pages that are not
     ///   executable.
-    memory: Box<[u32; (PAGE_SIZE_BYTES * 3) >> 2]>,
+    memory: BoxArray<u32, MEMORY_SIZE>,
     /// Look up table containing PAGE_SIZE offsets in `memory` for all pages in the system
     offset_lut: [u8; PAGE_COUNT],
+    /// BIOS SHA-256, used to make sure that we load the same BIOS when restoring the savestate
+    bios_sha256: [u8; 32],
 }
 
 impl XMemory {
@@ -29,8 +37,9 @@ impl XMemory {
             // 0xffff_ffff isn't a valid instruction, so we'll know right away if we're executing
             // from a bad location. Also, 0xff is normally what's returned from unmapped memory
             // reads so it's sort of accurate for these regions.
-            memory: box_array![0xffff_ffff; (PAGE_SIZE_BYTES * 3) >> 2],
+            memory: BoxArray::from_vec(vec![0xffff_ffff; (PAGE_SIZE_BYTES * 3) >> 2]),
             offset_lut: [MemoryPage::Bad as u8; PAGE_COUNT],
+            bios_sha256: [0; 32],
         };
 
         // Remap executable pages
@@ -68,6 +77,11 @@ impl XMemory {
         for i in 0..BIOS_SIZE {
             self.store(bios_base + i as u32, bios[i]);
         }
+
+        // Update bios_sha256
+        let mut hasher = Sha256::new();
+        hasher.input(bios);
+        hasher.result(&mut self.bios_sha256);
     }
 
     /// Fetch data from memory at `offset`
@@ -172,6 +186,35 @@ impl XMemory {
     }
 }
 
+impl Serialize for XMemory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("XMemory", 2)?;
+
+        {
+            let ram_base = (MemoryPage::Ram as usize) << PAGE_SHIFT;
+            let ram_end = ram_base + RAM_SIZE / 4;
+
+            state.serialize_field("ram", &self.memory[ram_base..ram_end])?;
+        }
+
+        state.serialize_field("bios_sha256", &self.bios_sha256)?;
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for XMemory {
+    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
 /// Order of the pages in `XMemory::memory`
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum MemoryPage {
@@ -201,3 +244,6 @@ const REGION_OFFSETS: [u32; 3] = [0x0000_0000, 0x8000_0000, 0xa000_0000];
 
 /// System RAM: 2MB
 const RAM_SIZE: usize = 2 * 1024 * 1024;
+
+/// Total size of the memory buffer, in 32bit words
+const MEMORY_SIZE: usize = (PAGE_SIZE_BYTES * 3) >> 2;

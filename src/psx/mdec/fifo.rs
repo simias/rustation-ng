@@ -1,4 +1,5 @@
 /// MDEC command FIFO
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CommandFifo {
     buffer: [u32; 0x20],
     /// Read index in buffer
@@ -63,7 +64,9 @@ impl CommandFifo {
 /// XXX The real PSX output FIFO is only 0x20 words long (I think?) but since we always decode one
 /// macroblock at once we need to be able to hold up to 48 words at once (in 24bpp mode) on top of
 /// up to 0x1f words already in the output FIFO.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct OutputFifo {
+    #[serde(with = "serde_big_array::BigArray")]
     buffer: [u8; 0x200],
     /// Read index in buffer
     read_index: u16,

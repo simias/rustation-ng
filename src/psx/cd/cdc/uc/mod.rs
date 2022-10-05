@@ -5,8 +5,10 @@ mod instructions;
 use super::Cdc;
 
 /// MC68HC05 microcontroller
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Uc {
     /// The full 64KiB address map, used for fetching instructions
+    #[serde(with = "serialize_memory")]
     memory: [u8; 0x1_0000],
     pc: u16,
     /// Stack pointer
@@ -124,8 +126,8 @@ impl Uc {
         uc.io_ports[3].set_output(0xff);
         uc.io_ports[4].set_output(0xff);
 
-        // On startup RAM appears to be mostly 0xff on bootup (judging by the bottom of the stack)
-        // although sometimes I get a clear bit here and there. The firmware seems to clear the
+        // On startup RAM appears to be mostly 0xff (judging by the bottom of the stack) although
+        // sometimes I get a clear bit here and there. The firmware seems to clear the
         // RAM (except for the stack region) on startup anyway.
         for addr in map::RAM.iter() {
             uc.memory[addr] = 0xff;
@@ -900,7 +902,7 @@ enum IrqVector {
     Reset = 14,
 }
 
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct IoPort {
     /// Current input state
     input: u8,
@@ -934,7 +936,7 @@ impl IoPort {
 }
 
 /// Interrupt control register
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct IntCr(u8);
 
 impl IntCr {
@@ -953,7 +955,7 @@ impl IntCr {
 }
 
 /// Interrupt status register
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct IntSr(u8);
 
 impl IntSr {
@@ -976,7 +978,7 @@ impl IntSr {
 }
 
 /// Timebase Control Register 1
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct TimebaseCtrl1(u8);
 
 impl TimebaseCtrl1 {
@@ -994,7 +996,7 @@ impl TimebaseCtrl1 {
 }
 
 /// Timebase Control Register 2
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct TimebaseCtrl2(u8);
 
 impl TimebaseCtrl2 {
@@ -1039,7 +1041,7 @@ impl TimebaseCtrl2 {
 }
 
 /// Timer1 control
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct Timer1Ctrl(u8);
 
 impl Timer1Ctrl {
@@ -1057,7 +1059,7 @@ impl Timer1Ctrl {
 }
 
 /// Timer2 control
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct Timer2Ctrl(u8);
 
 impl Timer2Ctrl {
@@ -1078,7 +1080,7 @@ impl Timer2Ctrl {
 }
 
 /// Timer2 status
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct Timer2Status(u8);
 
 impl Timer2Status {
@@ -1102,7 +1104,7 @@ impl Timer2Status {
 }
 
 /// Serial peripheral control register (SPCR)
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct SspiCtrl(u8);
 
 impl SspiCtrl {
@@ -1140,7 +1142,7 @@ impl SspiCtrl {
 }
 
 /// Serial peripheral status register (SPSR)
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct SspiStat(u8);
 
 impl SspiStat {
@@ -1159,7 +1161,7 @@ impl SspiStat {
 }
 
 /// Miscellaneous register (0x003e)
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct Misc(u8);
 
 impl Misc {
@@ -1237,7 +1239,7 @@ mod map {
 
     impl Range {
         /// Return `Some(offset)` if addr is contained in `self`
-        pub fn contains(self, addr: u16) -> Option<u16> {
+        pub const fn contains(self, addr: u16) -> Option<u16> {
             let Range(start, length) = self;
 
             if addr >= start && addr < start + length {
@@ -1254,8 +1256,16 @@ mod map {
             }
         }
 
-        pub fn start(self) -> usize {
+        pub const fn start(self) -> usize {
             self.0 as usize
+        }
+
+        pub const fn end(self) -> usize {
+            self.1 as usize
+        }
+
+        pub const fn len(self) -> usize {
+            self.end() - self.start()
         }
     }
 
@@ -1307,3 +1317,32 @@ pub const UC_FREQ: u32 = 4_233_600 / 2;
 
 /// Number of microcontroller cycles per audio cycle (@44.1kHz)
 const UC_CYCLES_PER_AUDIO_CYCLE: u32 = UC_FREQ / 44_100;
+
+mod serialize_memory {
+    use super::map::RAM;
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeSeq, Serializer},
+    };
+
+    pub fn serialize<S>(mem: &[u8; 0x1_0000], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We only need to serialize the RAM, the rest is ROM
+        let mut seq = serializer.serialize_seq(Some(RAM.len()))?;
+
+        for b in mem.iter().skip(RAM.start()).take(RAM.len()) {
+            seq.serialize_element(b)?;
+        }
+
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(_deserializer: D) -> Result<[u8; 0x1_0000], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
+    }
+}

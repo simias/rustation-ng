@@ -5,8 +5,9 @@
 mod draw;
 
 pub use draw::Pixel;
-
 use draw::Rasterizer;
+use serde::de::{Deserialize, Deserializer};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::sync::mpsc;
 use std::thread;
 
@@ -20,10 +21,11 @@ enum LastFrame {
 /// This is the handle used from the main thread to communicate with the rasterizer
 pub struct Handle {
     command_buffer: CommandBuffer,
+    last_frame: LastFrame,
     handle: Option<thread::JoinHandle<()>>,
     command_channel: mpsc::Sender<CommandBuffer>,
     frame_channel: mpsc::Receiver<Frame>,
-    last_frame: LastFrame,
+    serialization_channel: mpsc::Receiver<Vec<u8>>,
 }
 
 impl Handle {
@@ -31,7 +33,7 @@ impl Handle {
         self.command_buffer.push(c);
     }
 
-    /// Send the command buffer to the pasteurizer thread
+    /// Send the command buffer to the rasterizer thread
     pub fn flush_command_buffer(&mut self) {
         if self.command_buffer.is_empty() {
             return;
@@ -113,7 +115,6 @@ impl ::std::ops::Drop for Handle {
     fn drop(&mut self) {
         self.command_buffer.clear();
         self.push_command(Command::Quit);
-
         self.flush_command_buffer();
 
         if let Some(t) = self.handle.take() {
@@ -122,10 +123,41 @@ impl ::std::ops::Drop for Handle {
     }
 }
 
+impl Serialize for Handle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Ask the rasterizer to serialize its state
+        let cmd = vec![Command::Serialize];
+
+        self.command_channel.send(cmd).unwrap();
+
+        let mut state = serializer.serialize_struct("Handle", 2)?;
+
+        state.serialize_field("command_buffer", &self.command_buffer)?;
+
+        let rs = self.serialization_channel.recv().unwrap();
+        state.serialize_field("rasterizer_state", &rs)?;
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Handle {
+    fn deserialize<D>(_deserializer: D) -> Result<Handle, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
 /// Starts the rasterizer thread and returns a handle to it
 pub fn start() -> Handle {
     let (command_sender, command_receiver) = mpsc::channel();
     let (frame_sender, frame_receiver) = mpsc::channel();
+    let (serialization_sender, serialization_receiver) = mpsc::channel();
 
     let builder = thread::Builder::new()
         .name("RSX GPU".to_string())
@@ -133,25 +165,26 @@ pub fn start() -> Handle {
 
     let handle = builder
         .spawn(move || {
-            let mut rasterizer = Rasterizer::new(command_receiver, frame_sender);
-            rasterizer.run();
+            let mut rasterizer = Rasterizer::new();
+            rasterizer.run(command_receiver, frame_sender, serialization_sender);
         })
         .unwrap();
 
     let dummy_frame = Frame::new(0, 0);
 
     Handle {
-        last_frame: LastFrame::Frame(dummy_frame),
         command_buffer: Vec::new(),
+        last_frame: LastFrame::Frame(dummy_frame),
         handle: Some(handle),
         command_channel: command_sender,
         frame_channel: frame_receiver,
+        serialization_channel: serialization_receiver,
     }
 }
 
 type CommandBuffer = Vec<Command>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     /// GP0 register command
     Gp0(u32),
@@ -167,6 +200,8 @@ pub enum Command {
     EndOfFrame,
     /// Option setting
     Option(RasterizerOption),
+    /// We want to serialize the state of the rasterizer
+    Serialize,
 }
 
 impl Command {
@@ -175,7 +210,7 @@ impl Command {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RasterizerOption {
     DisplayFullVRam(bool),
     ForceTransparency(bool),
@@ -186,7 +221,7 @@ pub enum RasterizerOption {
 }
 
 /// Buffer containing one rendered frame
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct Frame {
     /// Frame pixels in xRGB 8888 format. Its size must always be *exactly* `width * height`.
     pub pixels: Vec<u32>,

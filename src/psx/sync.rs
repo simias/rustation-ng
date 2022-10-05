@@ -1,7 +1,7 @@
 use super::{dma, gpu, pad_memcard, spu, timers, CycleCount, Psx};
 
 /// Tokens used to keep track of the progress of each module individually
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum SyncToken {
     Gpu,
     Timers,
@@ -12,6 +12,7 @@ pub enum SyncToken {
     NumTokens,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Synchronizer {
     /// Array containing, for each module, the date corresponding to the last sync.
     last_sync: [CycleCount; SyncToken::NumTokens as usize],

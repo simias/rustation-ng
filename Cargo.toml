@@ -35,8 +35,11 @@ overflow-checks = false
 
 [dependencies]
 arrayref = "0.3"
+flexbuffers = "2.0"
 fnv = "1.0"
 libc = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde-big-array = "0.4"
 shaman = "0.1"
 thiserror = "1.0"
 
@@ -47,3 +50,4 @@ features = ["std"]
 [dependencies.cdimage]
 git = "https://github.com/simias/cdimage"
 branch = "master"
+features = ["serde"]

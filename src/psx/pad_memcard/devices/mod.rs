@@ -4,6 +4,8 @@ pub mod memory_card;
 use super::DsrState;
 use gamepad::{Button, ButtonState, GamePad};
 use memory_card::MemoryCardInterface;
+use serde::de::{Deserialize, Deserializer};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 
 pub struct Peripheral<T: DeviceInterface + ?Sized> {
     /// Connected device
@@ -65,6 +67,29 @@ impl<T: DeviceInterface + ?Sized> Peripheral<T> {
     /// Change the connected device
     pub fn connect_device(&mut self, device: Box<T>) {
         self.device = device
+    }
+}
+
+impl<T: DeviceInterface + ?Sized> Serialize for Peripheral<T> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We don't serialize the device, because it could potentially change independently of the
+        // savestate (like changing the controller type). At worst it could mean a glitchy
+        let mut state = serializer.serialize_struct("Peripheral", 2)?;
+        state.serialize_field("seq", &self.seq)?;
+        state.serialize_field("active", &self.active)?;
+        state.end()
+    }
+}
+
+impl<'de, T: DeviceInterface + ?Sized> Deserialize<'de> for Peripheral<T> {
+    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
     }
 }
 

@@ -1,13 +1,12 @@
-use std::fmt;
-
-use cdimage::{Bcd, DiscPosition, Image, Msf, Sector};
-
 use super::iso9660;
 use crate::error::{PsxError, Result};
 use crate::psx::gpu::VideoStandard;
-
 pub use cache::Cache as CdCache;
 use cache::CachedResult;
+use cdimage::{Bcd, DiscPosition, Image, Msf, Sector};
+use serde::de::{Deserialize, Deserializer};
+use serde::ser::{Serialize, SerializeStruct, Serializer};
+use std::fmt;
 
 mod cache;
 
@@ -52,6 +51,27 @@ impl Disc {
     }
 }
 
+impl Serialize for Disc {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We only serialize the serial number to make sure that we're reloaded with the same disc
+        let mut state = serializer.serialize_struct("Disc", 1)?;
+        state.serialize_field("serial", &self.serial)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Disc {
+    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
 /// Disc region
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Region {
@@ -75,7 +95,7 @@ impl Region {
 }
 
 /// Disc serial number
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq)]
 pub struct SerialNumber([u8; 10]);
 
 impl SerialNumber {

@@ -1,17 +1,18 @@
 mod db;
 
+use crate::box_array::BoxArray;
 use crate::error::{PsxError, Result};
 pub use db::Metadata;
 
 pub struct Bios {
-    rom: Box<[u8; BIOS_SIZE]>,
+    rom: BoxArray<u8, BIOS_SIZE>,
     metadata: &'static Metadata,
 }
 
 impl Bios {
     /// Create a BIOS image from `binary` and attempt to match it with an entry in the database. If
     /// no match can be found return an error.
-    pub fn new(binary: Box<[u8; BIOS_SIZE]>) -> Result<Bios> {
+    pub fn new(binary: BoxArray<u8, BIOS_SIZE>) -> Result<Bios> {
         match db::lookup_blob(&*binary) {
             Some(metadata) => Ok(Bios {
                 rom: binary,
@@ -29,7 +30,7 @@ impl Bios {
     /// Creates a BIOS instance with content set to all 0s.
     #[allow(dead_code)]
     pub fn new_dummy() -> Bios {
-        let rom = box_array![0; BIOS_SIZE];
+        let rom = BoxArray::from_vec(vec![0; BIOS_SIZE]);
 
         Bios {
             rom,

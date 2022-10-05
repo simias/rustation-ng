@@ -7,6 +7,7 @@ use std::ops::{Index, IndexMut};
 
 const DMASYNC: sync::SyncToken = sync::SyncToken::Dma;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Dma {
     control: Control,
     irq_config: IrqConfig,
@@ -495,7 +496,7 @@ impl Port {
 }
 
 /// DMA transfer synchronization mode
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SyncMode {
     /// Transfer starts when the CPU writes to the Trigger bit and transfers everything at once
     Manual = 0,
@@ -505,6 +506,7 @@ pub enum SyncMode {
     LinkedList = 2,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Channel {
     control: ChannelControl,
     /// Base address
@@ -546,7 +548,7 @@ impl Channel {
 }
 
 /// DMA channel control register
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct ChannelControl(u32);
 
 impl ChannelControl {
@@ -605,6 +607,7 @@ impl ChannelControl {
 }
 
 /// DMA control register
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Control(u32);
 
 impl Control {
@@ -622,6 +625,7 @@ impl Control {
 }
 
 /// DMA IRQ config register
+#[derive(serde::Serialize, serde::Deserialize)]
 struct IrqConfig(u32);
 
 impl IrqConfig {

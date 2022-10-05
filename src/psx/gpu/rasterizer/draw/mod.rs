@@ -10,13 +10,14 @@ use crate::psx::gpu::commands::{vram_access_dimensions, Shaded};
 use crate::psx::gpu::commands::{NoShading, Position, Transparent};
 use crate::psx::gpu::commands::{NoTexture, Opaque, ShadingMode, TextureBlending, TextureRaw};
 use crate::psx::gpu::commands::{TextureMode, TransparencyMode};
+use crate::BoxArray;
 
 use crate::psx::gpu::{DisplayMode, DrawMode, MaskSettings, TextureWindow, TransparencyFunction};
 use fixed_point::{FpCoord, FpVar};
 use std::cmp::{max, min};
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 enum State {
     /// We're waiting for the next command
     WaitingForCommand,
@@ -27,15 +28,12 @@ enum State {
     PolyLine(u8, Vertex),
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rasterizer {
-    vram: Box<[Pixel; 1024 * 512]>,
+    vram: BoxArray<Pixel, VRAM_PIXELS>,
     state: State,
     /// Frame currently being drawn
     cur_frame: Frame,
-    /// Channel used to receive commands
-    command_channel: mpsc::Receiver<CommandBuffer>,
-    /// Channel used to send completed frames back
-    frame_channel: mpsc::Sender<Frame>,
     /// Left edge of the clipping area
     clip_x_min: i32,
     /// Top edge of the clipping area
@@ -82,6 +80,7 @@ pub struct Rasterizer {
     ///   position.
     ///
     /// * `[_; 0x200]`: input value, from 0x000 to 0x1ff. Values above 0xff are saturated to 0xff
+    #[serde(with = "serialize_dither_table")]
     dither_table: [[[u8; 0x200]; 4]; 4],
     /// True if dithering is currently enabled
     dither_enabled: bool,
@@ -102,16 +101,11 @@ pub struct Rasterizer {
 }
 
 impl Rasterizer {
-    pub fn new(
-        command_channel: mpsc::Receiver<CommandBuffer>,
-        frame_channel: mpsc::Sender<Frame>,
-    ) -> Rasterizer {
-        let mut rasterizer = Rasterizer {
-            vram: box_array![Pixel::black(); 1024 * 512],
+    pub fn new() -> Rasterizer {
+        Rasterizer {
+            vram: BoxArray::from_vec(vec![Pixel::black(); 1024 * 512]),
             state: State::WaitingForCommand,
             cur_frame: Frame::new(0, 0),
-            command_channel,
-            frame_channel,
             clip_x_min: 0,
             clip_y_min: 0,
             clip_x_max: 0,
@@ -137,17 +131,20 @@ impl Rasterizer {
             display_bottom_field: false,
             draw_wireframe: false,
             draw_polygons: true,
-        };
-
-        rasterizer.rebuild_dither_table();
-        rasterizer.new_frame();
-
-        rasterizer
+        }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(
+        &mut self,
+        command_channel: mpsc::Receiver<CommandBuffer>,
+        frame_channel: mpsc::Sender<Frame>,
+        serialization_channel: mpsc::Sender<Vec<u8>>,
+    ) {
+        self.rebuild_dither_table();
+        self.new_frame();
+
         loop {
-            let commands = self.command_channel.recv().unwrap();
+            let commands = command_channel.recv().unwrap();
 
             let mut command_i = commands.iter();
 
@@ -176,7 +173,12 @@ impl Rasterizer {
                                     }
                                 }
 
-                                (h.handler)(self, &params[..len]);
+                                if opcode != 0xc0 {
+                                    (h.handler)(self, &params[..len]);
+                                } else {
+                                    // VRAM load
+                                    cmd_vram_load(self, &params[..len], &frame_channel);
+                                }
                             }
                             State::VRamStore(ref mut store) => {
                                 let p0 = Pixel::from_mbgr1555(*v as u16);
@@ -229,9 +231,24 @@ impl Rasterizer {
                     Command::Quit => return,
                     // XXX draw one line at a time
                     Command::EndOfLine(l) => self.finish_line(*l),
-                    Command::EndOfFrame => self.send_frame(),
+                    Command::EndOfFrame => {
+                        let frame = self.new_frame();
+                        frame_channel.send(frame).unwrap();
+                    }
                     Command::FieldChanged(f) => self.display_bottom_field = *f,
                     Command::Option(opt) => self.set_option(*opt),
+                    Command::Serialize => {
+                        use serde::Serialize;
+
+                        // If there are other pending commands they would be lost by the
+                        // serialization process
+                        assert!(command_i.next().is_none());
+
+                        let mut fb = flexbuffers::FlexbufferSerializer::new();
+                        self.serialize(&mut fb).unwrap();
+
+                        serialization_channel.send(fb.take_buffer()).unwrap();
+                    }
                 }
             }
         }
@@ -393,7 +410,7 @@ impl Rasterizer {
         }
     }
 
-    /// Creatses a new, blank frame and returns the previous one
+    /// Creates a new, blank frame and returns the previous one
     fn new_frame(&mut self) -> Frame {
         let interlaced = self.display_mode.is_true_interlaced();
 
@@ -441,20 +458,9 @@ impl Rasterizer {
         }
     }
 
-    fn send_frame(&mut self) {
-        let frame = self.new_frame();
-
-        self.frame_channel.send(frame).unwrap();
-    }
-
-    /// Create a new frame with the given `width` and `height` and send the pixels in the VRAM
+    /// Create a new frame with the given `width` and `height` and containing the pixels in the VRAM
     /// region locatied at `left`x`top`. Used to implement VRAM reads
-    fn send_vram_rect(&mut self, left: u16, top: u16, width: u16, height: u16) {
-        if width == 0 || height == 0 {
-            // Nothing to do
-            return;
-        }
-
+    fn copy_vram_rect(&mut self, left: u16, top: u16, width: u16, height: u16) -> Frame {
         let left = left as u32;
         let top = top as u32;
         let height = height as u32;
@@ -475,8 +481,7 @@ impl Rasterizer {
             }
         }
 
-        // Send to the main thread
-        self.frame_channel.send(frame).unwrap();
+        frame
     }
 
     /// Rebuild `dither_tables` based on the various dithering and color depth settings
@@ -1516,6 +1521,7 @@ fn cross_product(a: Position, b: Position, c: Position) -> i32 {
 /// Structure keeping track of the state needed to convert the extrapolated 8bit U/V values of the
 /// rasterizer into absolute coordinates in VRAM. The mapping is non-trivial because the PSX GPU
 /// uses 256x256 texture pages, coordinate masking and CLUTs of various depths.
+#[derive(serde::Serialize, serde::Deserialize)]
 struct TextureMapper {
     /// Draw mode configuration
     draw_mode: DrawMode,
@@ -1642,7 +1648,7 @@ impl TextureMapper {
 /// Generic representation of a Pixel, used to represent both 24bit 888RGB colors and 1555xRGB VRAM
 /// pixels. Internal representation is a single `u32` containing the values as 8888xRGB, meaning
 /// that it can normally be passed straight to the frontend without conversion
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq)]
 pub struct Pixel(pub u32);
 
 impl Pixel {
@@ -1798,7 +1804,7 @@ impl fmt::Debug for Pixel {
 }
 
 /// Description of a vertex with position, texture and shading (depending on the command)
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 struct Vertex {
     position: Position,
     color: Pixel,
@@ -2162,7 +2168,7 @@ where
     rasterizer.draw_line::<Transparency, Shading>(start_vertex, end_vertex);
 }
 
-#[derive(Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 struct VRamStore {
     x_min: u16,
     x_max: u16,
@@ -2253,7 +2259,7 @@ fn cmd_vram_store(rasterizer: &mut Rasterizer, params: &[u32]) {
     rasterizer.state = State::VRamStore(store);
 }
 
-fn cmd_vram_load(rasterizer: &mut Rasterizer, params: &[u32]) {
+fn cmd_vram_load(rasterizer: &mut Rasterizer, params: &[u32], frame_channel: &mpsc::Sender<Frame>) {
     let pos = params[1];
     let dim = params[2];
 
@@ -2262,7 +2268,14 @@ fn cmd_vram_load(rasterizer: &mut Rasterizer, params: &[u32]) {
 
     let (width, height) = vram_access_dimensions(dim, true);
 
-    rasterizer.send_vram_rect(left, top, width as u16, height as u16);
+    if width == 0 || height == 0 {
+        // Nothing to do
+        return;
+    }
+
+    let frame = rasterizer.copy_vram_rect(left, top, width as u16, height as u16);
+
+    frame_channel.send(frame).unwrap();
 }
 
 /// Fill a rectangle with a solid color
@@ -3134,7 +3147,8 @@ pub static GP0_COMMANDS: [CommandHandler; 0x100] = [
     },
     // 0xc0
     CommandHandler {
-        handler: cmd_vram_load,
+        // This one is handled explicitly elsewhere, only `len` matters
+        handler: cmd_unimplemented,
         len: 3,
     },
     CommandHandler {
@@ -3393,3 +3407,25 @@ pub static GP0_COMMANDS: [CommandHandler; 0x100] = [
         len: 1,
     },
 ];
+
+/// Total number of pixels in the VRAM
+const VRAM_PIXELS: usize = 1024 * 512;
+
+mod serialize_dither_table {
+    use serde::{de::Deserializer, ser::Serializer};
+
+    pub fn serialize<S>(_table: &[[[u8; 0x200]; 4]; 4], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // We don't have to save the dither tables since we can regenerate them
+        serializer.serialize_unit()
+    }
+
+    pub fn deserialize<'de, D>(_deserializer: D) -> Result<[[[u8; 0x200]; 4]; 4], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok([[[0; 0x200]; 4]; 4])
+    }
+}

@@ -1,5 +1,6 @@
 //! Handling of Memory Card saves on disc
 
+use crate::box_array::BoxArray;
 use crate::libretro;
 use crate::psx::pad_memcard::devices::memory_card::{MemoryCard, MemoryCardInterface, FLASH_SIZE};
 use std::fs::File;
@@ -65,7 +66,7 @@ impl MemoryCardFile {
             return Err(io::Error::new(io::ErrorKind::InvalidData, msg));
         }
 
-        let mut memory = Box::new([0; FLASH_SIZE]);
+        let mut memory = BoxArray::from_vec(vec![0; FLASH_SIZE]);
 
         file.read_exact(&mut *memory)?;
 

@@ -1,6 +1,7 @@
 use super::COMMAND_FIFO_DEPTH;
 
 /// GP0 command FIFO
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CommandFifo {
     buffer: [u32; COMMAND_FIFO_DEPTH],
     /// Read index in buffer. One bit wider that COMMAND_FIFO_DEPTH to differentiate FIFO full and

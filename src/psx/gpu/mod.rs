@@ -9,6 +9,7 @@ pub use rasterizer::{Frame, Pixel, RasterizerOption};
 
 const GPUSYNC: sync::SyncToken = sync::SyncToken::Gpu;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Gpu {
     state: State,
     rasterizer: rasterizer::Handle,
@@ -826,6 +827,7 @@ fn run_next_command(psx: &mut Psx) {
     (command.handler)(psx);
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum State {
     Idle,
     /// We're drawing the first triangle of a quad. The CycleCount is the number of cycles we'll
@@ -850,7 +852,7 @@ impl State {
 }
 
 /// Wrapper around the Draw Mode register value (set by GP0[0xe1] and polygon draw commands)
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct DrawMode(u32);
 
 impl DrawMode {
@@ -944,7 +946,7 @@ enum TransparencyFunction {
 }
 
 /// Wrapper around the Texture Window register value (set by GP0[0xe2])
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct TextureWindow(u32);
 
 impl TextureWindow {
@@ -988,7 +990,7 @@ impl TextureWindow {
 }
 
 /// Wrapper around the Display Mode register value (set by GP1[0x08])
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct DisplayMode(u32);
 
 impl DisplayMode {
@@ -1047,6 +1049,7 @@ impl DisplayMode {
 }
 
 /// Wrapper around the Mask Setting register value (set by GP0[0xe6])
+#[derive(serde::Serialize, serde::Deserialize)]
 struct MaskSettings {
     /// Raw register value
     raw: u32,
@@ -1094,7 +1097,7 @@ impl MaskSettings {
 }
 
 /// Requested DMA direction.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
 enum DmaDirection {
     Off = 0,
     Fifo = 1,
@@ -1124,7 +1127,7 @@ const COMMAND_FIFO_DEPTH: usize = 0x20;
 
 /// The are a few hardware differences between PAL and NTSC consoles, in particular the pixelclock
 /// runs slightly slower on PAL consoles.
-#[derive(Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
 pub enum VideoStandard {
     Ntsc,
     Pal,

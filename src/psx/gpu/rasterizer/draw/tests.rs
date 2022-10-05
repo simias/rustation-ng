@@ -3,18 +3,17 @@
 //! Unless otherwise noted the expected output was generated on a real PlayStation (model
 //! SCPH-7502, PAL).
 
-use super::{Command, CommandBuffer, Frame, Pixel, Rasterizer};
+use super::{Command, CommandBuffer, Pixel, Rasterizer};
 use std::sync::mpsc;
 
 fn build_rasterizer() -> (
     Rasterizer,
     mpsc::Sender<CommandBuffer>,
-    mpsc::Receiver<Frame>,
+    mpsc::Receiver<CommandBuffer>,
 ) {
     let (command_sender, command_receiver) = mpsc::channel();
-    let (frame_sender, frame_receiver) = mpsc::channel();
 
-    let rasterizer = Rasterizer::new(command_receiver, frame_sender);
+    let rasterizer = Rasterizer::new();
 
     let init_commands = vec![
         // Reset
@@ -29,7 +28,7 @@ fn build_rasterizer() -> (
 
     command_sender.send(init_commands).unwrap();
 
-    (rasterizer, command_sender, frame_receiver)
+    (rasterizer, command_sender, command_receiver)
 }
 
 fn vertex_coord(x: i16, y: i16) -> Command {
@@ -64,7 +63,9 @@ fn check_rasterizer(rasterizer: &Rasterizer, expected: &[&[Pixel]]) {
 
 #[test]
 fn quad_rect_solid_opaque() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         // Draw a red quad
@@ -78,7 +79,7 @@ fn quad_rect_solid_opaque() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -102,7 +103,9 @@ fn quad_rect_solid_opaque() {
 
 #[test]
 fn triangle_solid_opaque_pyramid_up() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -114,7 +117,7 @@ fn triangle_solid_opaque_pyramid_up() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -133,7 +136,9 @@ fn triangle_solid_opaque_pyramid_up() {
 
 #[test]
 fn triangle_solid_opaque_pyramid_down() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -145,7 +150,7 @@ fn triangle_solid_opaque_pyramid_down() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -164,7 +169,9 @@ fn triangle_solid_opaque_pyramid_down() {
 
 #[test]
 fn triangle_solid_opaque_flat_up() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -176,7 +183,7 @@ fn triangle_solid_opaque_flat_up() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -196,7 +203,9 @@ fn triangle_solid_opaque_flat_up() {
 
 #[test]
 fn triangle_solid_opaque_flat_down() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -208,7 +217,7 @@ fn triangle_solid_opaque_flat_down() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -228,7 +237,9 @@ fn triangle_solid_opaque_flat_down() {
 
 #[test]
 fn triangle_solid_opaque_flat_right() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -240,7 +251,7 @@ fn triangle_solid_opaque_flat_right() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -263,7 +274,9 @@ fn triangle_solid_opaque_flat_right() {
 
 #[test]
 fn triangle_solid_opaque_flat_left() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -275,7 +288,7 @@ fn triangle_solid_opaque_flat_left() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -298,7 +311,9 @@ fn triangle_solid_opaque_flat_left() {
 
 #[test]
 fn triangle_solid_opaque_slant_top_left() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -310,7 +325,7 @@ fn triangle_solid_opaque_slant_top_left() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -330,7 +345,9 @@ fn triangle_solid_opaque_slant_top_left() {
 
 #[test]
 fn triangle_solid_opaque_slant_top_right() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -342,7 +359,7 @@ fn triangle_solid_opaque_slant_top_right() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -362,7 +379,9 @@ fn triangle_solid_opaque_slant_top_right() {
 
 #[test]
 fn triangle_solid_opaque_slant_bot_left() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -374,7 +393,7 @@ fn triangle_solid_opaque_slant_bot_left() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -394,7 +413,9 @@ fn triangle_solid_opaque_slant_bot_left() {
 
 #[test]
 fn triangle_solid_opaque_slant_bot_right() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -406,7 +427,7 @@ fn triangle_solid_opaque_slant_bot_right() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -426,7 +447,9 @@ fn triangle_solid_opaque_slant_bot_right() {
 
 #[test]
 fn triangle_solid_opaque_mid_right() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -438,7 +461,7 @@ fn triangle_solid_opaque_mid_right() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -460,7 +483,9 @@ fn triangle_solid_opaque_mid_right() {
 
 #[test]
 fn triangle_solid_opaque_mid_left() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -472,7 +497,7 @@ fn triangle_solid_opaque_mid_left() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -496,7 +521,9 @@ fn triangle_solid_opaque_mid_left() {
 /// Draw a large triangle with a non-trivial edge slope to catch precision errors
 #[test]
 fn triangle_solid_opaque_big1() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -508,7 +535,7 @@ fn triangle_solid_opaque_big1() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -542,7 +569,9 @@ fn triangle_solid_opaque_big1() {
 /// Same as big1 but with a small x offset change, enough to change the drawing slightly
 #[test]
 fn triangle_solid_opaque_big2() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x200000ff),
@@ -554,7 +583,7 @@ fn triangle_solid_opaque_big2() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -588,7 +617,9 @@ fn triangle_solid_opaque_big2() {
 /// The PSX only allows to draw triangles up to 512 pixels in height and 1024 pixels in width
 #[test]
 fn triangle_solid_opaque_draw_limits() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         // First a red triangle with the max possible size
@@ -611,7 +642,7 @@ fn triangle_solid_opaque_draw_limits() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -634,7 +665,9 @@ fn triangle_solid_opaque_draw_limits() {
 /// same pixels
 #[test]
 fn triangle_solid_opaque_false_friends() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x2000_00ff),
@@ -652,7 +685,7 @@ fn triangle_solid_opaque_false_friends() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);
@@ -682,7 +715,9 @@ fn triangle_solid_opaque_false_friends() {
 
 #[test]
 fn gouraud_rgb_right() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         Command::Gp0(0x300000ff),
@@ -696,7 +731,7 @@ fn gouraud_rgb_right() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let p = mbgr_px;
 
@@ -807,7 +842,9 @@ fn gouraud_rgb_right() {
 /// Test for an overflow issue in Spyro (PAL)
 #[test]
 fn test_overflow() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         // Clip top-left
@@ -830,13 +867,15 @@ fn test_overflow() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 }
 
 /// Test for a broken triangle in PSX's intro when FpCoord::epsilon() is set to 1.
 #[test]
 fn test_bad_draw_psx_logo() {
-    let (mut rasterizer, command_channel, _) = build_rasterizer();
+    let (mut rasterizer, command_channel, command_receiver) = build_rasterizer();
+    let (frame_sender, _frame_receiver) = mpsc::channel();
+    let (serialization_sender, _serialization_receiver) = mpsc::channel();
 
     let commands = vec![
         // Triangle
@@ -849,7 +888,7 @@ fn test_bad_draw_psx_logo() {
 
     command_channel.send(commands).unwrap();
 
-    rasterizer.run();
+    rasterizer.run(command_receiver, frame_sender, serialization_sender);
 
     let x = Pixel::black();
     let r = bgr_px(0x0000ff);

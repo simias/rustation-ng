@@ -16,6 +16,7 @@ const TIMER_IRQ: [irq::Interrupt; 3] = [
     irq::Interrupt::Timer2,
 ];
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Timers {
     timers: [Timer; 3],
     /// True if the GPU is currently in an HSync
@@ -178,7 +179,7 @@ impl IndexMut<usize> for Timers {
 }
 
 /// Timer synchronization state
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
 enum SyncState {
     /// Timer is stopped
     Stopped,
@@ -190,6 +191,7 @@ enum SyncState {
     WaitingForSyncEnd,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Timer {
     mode: Mode,
     /// The counter is really 16bit but we use a wider value to avoid overflows (since we might
@@ -649,6 +651,7 @@ pub fn store<T: Addressable>(psx: &mut Psx, offset: u32, val: T) {
 }
 
 /// Timer mode register
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Mode(u16);
 
 impl Mode {

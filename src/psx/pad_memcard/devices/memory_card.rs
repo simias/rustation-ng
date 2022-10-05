@@ -1,4 +1,5 @@
 use super::{DeviceInterface, DsrState};
+use crate::box_array::BoxArray;
 use crate::psx::CycleCount;
 
 pub trait MemoryCardInterface: DeviceInterface {
@@ -14,7 +15,7 @@ pub trait MemoryCardInterface: DeviceInterface {
 /// The standard SCPH-1020 memory card
 pub struct MemoryCard {
     /// The non-volatile Flash memory itself
-    memory: Box<[u8; FLASH_SIZE]>,
+    memory: BoxArray<u8, FLASH_SIZE>,
     /// Write counter, incremented every time the memory is written to *if* the contents of the
     /// flash have been changed.
     write_counter: u32,
@@ -35,7 +36,7 @@ pub struct MemoryCard {
 impl MemoryCard {
     /// Creates an empty memory card image
     pub fn new_formatted() -> MemoryCard {
-        let mut mc = MemoryCard::new_with_memory(box_array![0; FLASH_SIZE]);
+        let mut mc = MemoryCard::new_with_memory(BoxArray::from_vec(vec![0; FLASH_SIZE]));
 
         mc.format();
 
@@ -43,7 +44,7 @@ impl MemoryCard {
     }
 
     /// Create a memory card image with the provided memory contents
-    pub fn new_with_memory(memory: Box<[u8; FLASH_SIZE]>) -> MemoryCard {
+    pub fn new_with_memory(memory: BoxArray<u8, FLASH_SIZE>) -> MemoryCard {
         MemoryCard {
             memory,
             write_counter: 0,

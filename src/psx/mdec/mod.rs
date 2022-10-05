@@ -5,6 +5,7 @@ use std::cmp::min;
 use std::ops::{Index, IndexMut};
 
 /// Motion Decoder (sometimes called macroblock or movie decoder).
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MDec {
     /// Current state of the decoder
     state: State,
@@ -18,8 +19,9 @@ pub struct MDec {
     command_remaining: u16,
     dma_in_enabled: bool,
     dma_out_enabled: bool,
-    /// Quantization matrices: 8x8 bytes, first one is for luma, 2nd is for chroma.
-    quant_matrices: [[u8; 64]; 2],
+    /// Quantization matrices: 8x8 bytes, first 64bytes for luma, second 64bits for chroma.
+    #[serde(with = "serde_big_array::BigArray")]
+    quant_matrices: [u8; 128],
     idct_matrix: IdctMatrix,
     current_block: BlockType,
     /// Index in the current macroblock
@@ -52,7 +54,7 @@ impl MDec {
             command_remaining: 0,
             dma_in_enabled: false,
             dma_out_enabled: false,
-            quant_matrices: [[0; 64]; 2],
+            quant_matrices: [0; 128],
             idct_matrix: IdctMatrix::new(),
             current_block: BlockType::CrMono,
             block_index: 0,
@@ -118,7 +120,7 @@ impl MDec {
                     for i in 0..4 {
                         let b = (next_word >> (i * 8)) as u8;
 
-                        self.quant_matrices[matrix][pos + i] = b;
+                        self.quant_matrices[(matrix << 6) + pos + i] = b;
                     }
 
                     self.command_remaining = self.command_remaining.wrapping_sub(1);
@@ -298,7 +300,7 @@ impl MDec {
             }
         };
 
-        self.quant_matrices[matrix][index]
+        self.quant_matrices[(matrix << 6) + index]
     }
 
     /// Set the value of the current block coeff pointed to by `block_index` and increment
@@ -496,7 +498,7 @@ pub fn dma_load(psx: &mut Psx) -> (u32, u32) {
     (v, (offset as u32) << 2)
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 enum State {
     Idle,
     LoadQuantTable(u8),
@@ -511,7 +513,7 @@ impl State {
 }
 
 /// Command word
-#[derive(Copy, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 struct Command(u32);
 
 impl Command {
@@ -569,11 +571,15 @@ enum OutputDepth {
     D24 = 2,
 }
 
-struct IdctMatrix([i16; 64]);
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IdctMatrix {
+    #[serde(with = "serde_big_array::BigArray")]
+    matrix: [i16; 64],
+}
 
 impl IdctMatrix {
     fn new() -> IdctMatrix {
-        IdctMatrix([0; 64])
+        IdctMatrix { matrix: [0; 64] }
     }
 
     fn set(&mut self, index: u8, coef: i16) {
@@ -645,17 +651,17 @@ impl Index<usize> for IdctMatrix {
     type Output = i16;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index as usize]
+        &self.matrix[index as usize]
     }
 }
 
 impl IndexMut<usize> for IdctMatrix {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index as usize]
+        &mut self.matrix[index as usize]
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 enum BlockType {
     Y1 = 0,
     Y2 = 1,
@@ -744,11 +750,15 @@ fn yuv_to_rgb(y: i8, u: i8, v: i8) -> (u8, u8, u8) {
     (r, g, b)
 }
 
-struct Macroblock([i8; 8 * 8]);
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Macroblock {
+    #[serde(with = "serde_big_array::BigArray")]
+    block: [i8; 8 * 8],
+}
 
 impl Macroblock {
     fn new() -> Macroblock {
-        Macroblock([0; 8 * 8])
+        Macroblock { block: [0; 8 * 8] }
     }
 }
 
@@ -756,21 +766,25 @@ impl Index<usize> for Macroblock {
     type Output = i8;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index as usize]
+        &self.block[index as usize]
     }
 }
 
 impl IndexMut<usize> for Macroblock {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index as usize]
+        &mut self.block[index as usize]
     }
 }
 /// Coefficients during macroblock decoding
-struct MacroblockCoeffs([i16; 8 * 8]);
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MacroblockCoeffs {
+    #[serde(with = "serde_big_array::BigArray")]
+    coeffs: [i16; 8 * 8],
+}
 
 impl MacroblockCoeffs {
     fn new() -> MacroblockCoeffs {
-        MacroblockCoeffs([0; 8 * 8])
+        MacroblockCoeffs { coeffs: [0; 8 * 8] }
     }
 
     /// RLE-encoded values are encoded using a "zigzag" pattern in
@@ -794,7 +808,7 @@ impl MacroblockCoeffs {
 
         let index = zigzag[pos as usize];
 
-        self.0[index as usize] = coeff
+        self.coeffs[index as usize] = coeff
     }
 }
 
@@ -802,13 +816,13 @@ impl Index<usize> for MacroblockCoeffs {
     type Output = i16;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index as usize]
+        &self.coeffs[index as usize]
     }
 }
 
 impl IndexMut<usize> for MacroblockCoeffs {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index as usize]
+        &mut self.coeffs[index as usize]
     }
 }
 
@@ -866,12 +880,14 @@ fn test_quantize_ac() {
 
 #[test]
 fn test_idct() {
-    let coeffs = MacroblockCoeffs([
-        0, 257, 514, 771, 1028, 1285, 1542, 1799, 8, 265, 522, 779, 1036, 1293, 1550, 1807, 16,
-        273, 530, 787, 1044, 1301, 1558, 1815, 24, 281, 538, 795, 1052, 1309, 1566, 1823, 32, 289,
-        546, 803, 1060, 1317, 1574, 1831, 40, 297, 554, 811, 1068, 1325, 1582, 1839, 48, 305, 562,
-        819, 1076, 1333, 1590, 1847, 56, 313, 570, 827, 1084, 1341, 1598, 1855,
-    ]);
+    let coeffs = MacroblockCoeffs {
+        coeffs: [
+            0, 257, 514, 771, 1028, 1285, 1542, 1799, 8, 265, 522, 779, 1036, 1293, 1550, 1807, 16,
+            273, 530, 787, 1044, 1301, 1558, 1815, 24, 281, 538, 795, 1052, 1309, 1566, 1823, 32,
+            289, 546, 803, 1060, 1317, 1574, 1831, 40, 297, 554, 811, 1068, 1325, 1582, 1839, 48,
+            305, 562, 819, 1076, 1333, 1590, 1847, 56, 313, 570, 827, 1084, 1341, 1598, 1855,
+        ],
+    };
 
     // This is the "standard" IDCT table used in most PSX games
     let idct_coeffs: [i16; 64] = [
@@ -894,13 +910,15 @@ fn test_idct() {
 
     matrix.idct(&coeffs, &mut block);
 
-    let expected = Macroblock([
-        -128, -95, 71, -27, 38, -5, 22, 9, 127, 96, -75, 27, -40, 4, -23, -10, 127, -39, 30, -11,
-        16, -2, 9, 4, -117, 33, -26, 9, -14, 1, -8, -3, 62, -18, 14, -5, 7, -1, 4, 2, -52, 14, -11,
-        4, -6, 1, -4, -2, 21, -6, 5, -2, 3, 0, 1, 1, -14, 3, -3, 1, -1, 0, -1, 0,
-    ]);
+    let expected = Macroblock {
+        block: [
+            -128, -95, 71, -27, 38, -5, 22, 9, 127, 96, -75, 27, -40, 4, -23, -10, 127, -39, 30,
+            -11, 16, -2, 9, 4, -117, 33, -26, 9, -14, 1, -8, -3, 62, -18, 14, -5, 7, -1, 4, 2, -52,
+            14, -11, 4, -6, 1, -4, -2, 21, -6, 5, -2, 3, 0, 1, 1, -14, 3, -3, 1, -1, 0, -1, 0,
+        ],
+    };
 
     for i in 0..64 {
-        assert_eq!(expected.0[i], block.0[i]);
+        assert_eq!(expected.block[i], block.block[i]);
     }
 }

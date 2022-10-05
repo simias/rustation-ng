@@ -1,4 +1,5 @@
 /// CD audio resampler for a single channel
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct AudioResampler {
     /// Circular buffer containing the last received samples. Technically we only need 25 samples
     /// but using 32 makes it quicker to manage the indexes.

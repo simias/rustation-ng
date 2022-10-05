@@ -7,6 +7,7 @@ use super::Disc;
 use cdimage::Sector;
 pub use uc::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Cdc {
     uc: uc::Uc,
     decoder: decoder::Decoder,

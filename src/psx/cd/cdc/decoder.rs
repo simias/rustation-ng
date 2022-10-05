@@ -7,6 +7,7 @@ use cdimage::Sector;
 use std::fmt;
 
 /// CXD1815Q
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Decoder {
     state: DecoderState,
     irq: IrqController,
@@ -73,10 +74,12 @@ pub struct Decoder {
     /// frequency of 44.1kHz
     adpcm_audio_phase: u8,
     /// Temporary buffer holding decoded samples before 44.1kHz resampling
+    #[serde(with = "serde_big_array::BigArray")]
     sample_buffer: [[i16; 2]; 4032],
     /// Two resamplers for the left and right stereo channels
     resamplers: [AudioResampler; 2],
     /// RAM used to store decoded sectors
+    #[serde(with = "serde_big_array::BigArray")]
     ram: [u8; 32 * 1024],
     /// Host command parameter FIFO
     host_params: HostFifo,
@@ -1109,7 +1112,7 @@ fn refresh_irq(cdc: &mut Cdc) {
     cdc.uc.set_decoder_xint(xint_lvl);
 }
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct IrqController {
     /// Active interrupts
     status: u8,
@@ -1133,7 +1136,7 @@ impl IrqController {
 }
 
 #[allow(dead_code)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
 enum Irq {
     /// Host chip reset issued
     HCRIsd = 0,
@@ -1153,6 +1156,7 @@ enum Irq {
     DrvOvrn = 7,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum DecoderState {
     Idle,
     /// A sector was received from the DSP
@@ -1169,7 +1173,7 @@ impl DecoderState {
 }
 
 /// Decoder control register
-#[derive(Copy, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, Debug)]
 struct DecCtl(u8);
 
 impl DecCtl {
@@ -1256,6 +1260,7 @@ impl DecoderMode {
 }
 
 /// A 4-byte buffer that's read one byte at a time
+#[derive(serde::Serialize, serde::Deserialize)]
 struct HdrBuf {
     buf: [u8; 4],
     pos: u8,
@@ -1285,7 +1290,7 @@ impl HdrBuf {
 }
 
 /// 16byte FIFO used to store command arguments and responses
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct HostFifo {
     /// Data buffer
     buffer: [u8; 16],
@@ -1389,9 +1394,11 @@ enum AudioFrequency {
 /// Note that for the OutputBuffer code to work, it *has* to be a power of two
 const OUTPUT_BUFFER_SIZE: usize = 16 * 1024;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct OutputBuffer {
     /// Stereo samples circular buffer
-    samples: Box<[[i16; 2]; OUTPUT_BUFFER_SIZE]>,
+    #[serde(with = "serde_big_array::BigArray")]
+    samples: [[i16; 2]; OUTPUT_BUFFER_SIZE],
     /// Write pointer
     write_idx: u16,
     /// Read pointer
@@ -1402,10 +1409,8 @@ struct OutputBuffer {
 
 impl OutputBuffer {
     pub fn new() -> OutputBuffer {
-        let samples = box_array![[0; 2]; OUTPUT_BUFFER_SIZE];
-
         OutputBuffer {
-            samples,
+            samples: [[0; 2]; OUTPUT_BUFFER_SIZE],
             write_idx: 0,
             read_idx: 0,
             start_delay: 0,

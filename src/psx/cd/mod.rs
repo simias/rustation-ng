@@ -10,6 +10,7 @@ pub use cdc::MC68HC05_ROM_DUMP_SIZE as CDC_ROM_SIZE;
 use disc::Disc;
 use shaman::{digest::Digest, sha2::Sha256};
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CdInterface {
     cdc: cdc::Cdc,
     irq_active: bool,

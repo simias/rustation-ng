@@ -11,6 +11,7 @@ use self::devices::Peripheral;
 
 const PADSYNC: sync::SyncToken = sync::SyncToken::PadMemCard;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct PadMemCard {
     /// Serial clock divider. The LSB is read/write but is not used, This way the hardware divide
     /// the CPU clock by half of `baud_div` and can invert the serial clock polarity twice every
@@ -516,7 +517,7 @@ pub fn load<T: Addressable>(psx: &mut Psx, off: u32) -> T {
 }
 
 /// Identifies the target of the serial communication, either the gamepad/memory card port 0 or 1.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 enum Target {
     PadMemCard1 = 0,
     PadMemCard2 = 1,
@@ -533,7 +534,7 @@ impl Target {
 }
 
 /// Controller transaction state machine
-#[derive(PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 enum TransferState {
     /// Bus is idle
     Idle,
@@ -552,7 +553,7 @@ impl TransferState {
 }
 
 /// State of the DSR (data available) signal coming from one of the pads or memcards
-#[derive(PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 pub enum DsrState {
     /// No event pending
     Idle,

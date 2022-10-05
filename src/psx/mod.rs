@@ -1,7 +1,5 @@
 //! Top level for the emulation code. Contains the state of the emulated console.
 
-#[macro_use]
-mod box_array;
 pub mod bios;
 mod cd;
 pub mod cop0;
@@ -29,6 +27,7 @@ pub use gpu::{Frame, VideoStandard};
 pub type CycleCount = i32;
 
 /// Current state of the emulator
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Psx {
     /// Counter of the number of CPU cycles elapsed since an arbitrary point in time. Used as the
     /// reference to synchronize the other modules
@@ -518,15 +517,17 @@ impl Addressable for u32 {
 }
 
 /// Scratch Pad (data cache used as fast RAM)
+#[derive(serde::Serialize, serde::Deserialize)]
 struct ScratchPad {
-    data: Box<[u8; SCRATCH_PAD_SIZE]>,
+    #[serde(with = "serde_big_array::BigArray")]
+    data: [u8; SCRATCH_PAD_SIZE],
 }
 
 impl ScratchPad {
     /// Instantiate Scratch Pad
     pub fn new() -> ScratchPad {
         ScratchPad {
-            data: box_array![0; SCRATCH_PAD_SIZE],
+            data: [0; SCRATCH_PAD_SIZE],
         }
     }
 

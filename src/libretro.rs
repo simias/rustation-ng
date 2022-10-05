@@ -33,7 +33,7 @@ pub trait Context {
     /// Return the maximum size of a save state in bytes
     fn serialize_size(&self) -> usize;
     /// Serialize the savestate in the provided buffer
-    fn serialize(&self, data: &mut [u8]) -> Result<(), ()>;
+    fn serialize(&mut self, data: &mut [u8]) -> Result<(), ()>;
     /// Deserialize the savestate from the provided buffer
     fn unserialize(&mut self, data: &[u8]) -> Result<(), ()>;
 }
@@ -1135,7 +1135,7 @@ pub mod dummy {
             panic!("Called serialize_size with no context!");
         }
 
-        fn serialize(&self, _: &mut [u8]) -> Result<(), ()> {
+        fn serialize(&mut self, _: &mut [u8]) -> Result<(), ()> {
             panic!("Called serialize with no context!");
         }
 

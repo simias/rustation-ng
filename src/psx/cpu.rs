@@ -7,6 +7,7 @@ use super::{cop0, debugger, map, AccessWidth, Addressable, CycleCount, Psx};
 
 use std::fmt;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Cpu {
     /// Address of the instruction currently being executed. Used for
     /// setting the EPC in exceptions.
@@ -36,6 +37,7 @@ pub struct Cpu {
     /// delay slot.
     branch: bool,
     /// Instruction cache (256 4-word cachelines, for a total of 4KiB)
+    #[serde(with = "serde_big_array::BigArray")]
     icache: [ICacheLine; 0x100],
     /// Set if the current instruction executes in the delay slot
     delay_slot: bool,
@@ -1693,7 +1695,7 @@ fn op_irq(psx: &mut Psx, _instruction: Instruction) {
 }
 
 /// A single MIPS instruction wrapper to make decoding easier
-#[derive(Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
 pub struct Instruction(u32);
 
 impl Instruction {
@@ -1784,7 +1786,7 @@ impl fmt::Display for Instruction {
 
 /// A simple wrapper around a register index to avoid coding errors where the register index could
 /// be used instead of its value
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct RegisterIndex(pub u8);
 
 /// Handler table for the main opcodes (instruction bits [31:26])
@@ -1880,7 +1882,7 @@ const REGISTER_NAMES: [&str; 32] = [
 ];
 
 /// Instruction cache line
-#[derive(Clone, Copy)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
 struct ICacheLine {
     /// Tag: high 22bits of the address associated with this cacheline Valid bits: 3 bit index of
     /// the first valid word in line.
