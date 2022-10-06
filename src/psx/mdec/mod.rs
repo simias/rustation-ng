@@ -69,6 +69,10 @@ impl MDec {
         }
     }
 
+    pub fn is_busy(&self) -> bool {
+        self.state.is_busy()
+    }
+
     pub fn run(&mut self, cycles: CycleCount) {
         // XXX implement MDEC timings
         let _ = cycles;

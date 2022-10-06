@@ -853,7 +853,6 @@ pub extern "C" fn retro_api_version() -> c_uint {
 
 #[no_mangle]
 pub extern "C" fn retro_set_environment(callback: EnvironmentFn) {
-    println!("SET ENVIRONMENT");
     unsafe { ENVIRONMENT = callback }
 
     super::init_variables();

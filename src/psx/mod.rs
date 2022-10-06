@@ -1,7 +1,7 @@
 //! Top level for the emulation code. Contains the state of the emulated console.
 
 pub mod bios;
-mod cd;
+pub mod cd;
 pub mod cop0;
 pub mod cpu;
 pub mod debugger;
@@ -47,7 +47,7 @@ pub struct Psx {
     timers: timers::Timers,
     pub gpu: gpu::Gpu,
     mdec: mdec::MDec,
-    cd: cd::CdInterface,
+    pub cd: cd::CdInterface,
     pub pad_memcard: pad_memcard::PadMemCard,
     /// Memory control registers
     mem_control: [u32; 9],

@@ -13,6 +13,7 @@ pub struct Cdc {
     decoder: decoder::Decoder,
     dsp: dsp::Dsp,
     disc: Option<Disc>,
+    loading_speed: u8,
 }
 
 impl Cdc {
@@ -24,6 +25,7 @@ impl Cdc {
             decoder: decoder::Decoder::new(),
             dsp: dsp::Dsp::new(region),
             disc,
+            loading_speed: 2,
         };
 
         // I start with the sled at some location on the disc to simulate the case where the
@@ -38,20 +40,45 @@ impl Cdc {
         cdc
     }
 
-    fn disc_present(&self) -> bool {
+    pub fn disc_present(&self) -> bool {
         self.disc.is_some()
     }
 
+    pub fn set_cd_loading_speed(&mut self, loading_speed: u8) {
+        self.loading_speed = loading_speed
+    }
+
     /// Advance emulation by 1/44100th of a second
-    pub fn run_audio_cycle(&mut self) -> [i16; 2] {
+    pub fn run_audio_cycle(&mut self, allow_overclock: bool) -> [i16; 2] {
         // We synchronize every module every 1/44100th of a second. It's not cycle-accurate (all
         // these chips run at several MHz) but given that most events have mechanical constraints
         // that shouldn't really matter since the average jitter is generally well beyond the
         // precision granted by this method.
-        uc::run_audio_cycle(self);
-        dsp::run_audio_cycle(self);
 
-        decoder::run_audio_cycle(self)
+        let cycles_to_run = if self.loading_speed > 1 {
+            // Attempt to increase the loading speed if it's safe to do so
+            let can_overclock = allow_overclock
+                && self.decoder.is_double_speed()
+                && !self.decoder.is_streaming_audio();
+
+            if can_overclock {
+                self.loading_speed
+            } else {
+                // Default to the native speed
+                1
+            }
+        } else {
+            // No overclocking requested
+            1
+        };
+
+        for _ in 0..cycles_to_run {
+            uc::run_audio_cycle(self);
+            dsp::run_audio_cycle(self);
+            decoder::run_audio_cycle(self);
+        }
+
+        decoder::get_audio_sample(self)
     }
 
     /// Writes coming from the host CPU (the main MIPS CPU)

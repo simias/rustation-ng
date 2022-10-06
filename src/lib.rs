@@ -500,6 +500,10 @@ impl libretro::Context for Context {
         self.psx
             .gpu
             .set_rasterizer_option(RasterizerOption::DrawPolygons(draw_poly));
+
+        self.psx
+            .cd
+            .set_cd_loading_speed(options::CoreOptions::cd_speed() / 2);
     }
 
     fn reset(&mut self) {
@@ -722,7 +726,7 @@ mod options {
         pub struct CoreOptions (prefix = "rustation") {
             internal_upscale_factor: u32, parse_upscale
                 => "Internal upscaling factor; 1x (native)";
-            internal_color_depth: u8, parse_color_depth
+            internal_color_depth: u8, parse_u8
                 => "Internal color depth; dithered 15bpp (native)|24bpp";
             display_full_vram: bool, parse_bool
                 => "Display full VRAM; disabled|enabled";
@@ -730,6 +734,8 @@ mod options {
                 => "Force transparency for all draw commands; disabled|enabled";
             wireframe: WireframeMode, parse_wireframe
                 => "Draw wireframe for triangles and quads; disabled|overlay|wireframe only";
+            cd_speed: u8, parse_u8
+                => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
             analog_combo: AnalogCombo, parse_analog_combo
                 => "Analog toggle button combo; \
                 Select + R3|Select + L3|L3 + R3";
@@ -741,7 +747,7 @@ mod options {
         num.parse()
     }
 
-    fn parse_color_depth(opt: &str) -> Result<u8, <u8 as FromStr>::Err> {
+    fn parse_u8(opt: &str) -> Result<u8, <u8 as FromStr>::Err> {
         let num = opt.trim_matches(|c: char| !c.is_numeric());
 
         num.parse()

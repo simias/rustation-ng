@@ -137,6 +137,14 @@ impl Decoder {
         }
     }
 
+    pub fn is_double_speed(&self) -> bool {
+        self.dblspd
+    }
+
+    pub fn is_streaming_audio(&self) -> bool {
+        !self.output_buffer.is_empty()
+    }
+
     fn host_command(&mut self, cmd: u8) {
         self.host_command = cmd;
         self.command_busy = true;
@@ -500,7 +508,7 @@ impl Decoder {
     }
 }
 
-pub fn run_audio_cycle(cdc: &mut Cdc) -> [i16; 2] {
+pub fn run_audio_cycle(cdc: &mut Cdc) {
     match cdc.decoder.adpcm_busy_counter {
         0 => (),
         1 => {
@@ -751,7 +759,9 @@ pub fn run_audio_cycle(cdc: &mut Cdc) -> [i16; 2] {
             }
         }
     }
+}
 
+pub fn get_audio_sample(cdc: &mut Cdc) -> [i16; 2] {
     cdc.decoder.output_buffer.pop_sample_44100()
 }
 

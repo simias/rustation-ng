@@ -14,6 +14,9 @@ use shaman::{digest::Digest, sha2::Sha256};
 pub struct CdInterface {
     cdc: cdc::Cdc,
     irq_active: bool,
+    /// Counter to prevent overclocking the CDC when the MDEC is active (since it's probably
+    /// streaming data from the CD)
+    mdec_busy_cooldown: u16,
 }
 
 impl CdInterface {
@@ -60,7 +63,15 @@ impl CdInterface {
 
         let irq_active = cdc.irq_active();
 
-        Ok(CdInterface { cdc, irq_active })
+        Ok(CdInterface {
+            cdc,
+            irq_active,
+            mdec_busy_cooldown: 0,
+        })
+    }
+
+    pub fn set_cd_loading_speed(&mut self, loading_speed: u8) {
+        self.cdc.set_cd_loading_speed(loading_speed);
     }
 }
 
@@ -77,7 +88,14 @@ pub fn dma_load(psx: &mut Psx) -> u32 {
 }
 
 pub fn run_audio_cycle(psx: &mut Psx) -> [i16; 2] {
-    let sample = psx.cd.cdc.run_audio_cycle();
+    if psx.mdec.is_busy() {
+        // Prevent overclocking for a quarter of a second
+        psx.cd.mdec_busy_cooldown = 44_100 / 4;
+    } else if psx.cd.mdec_busy_cooldown > 0 {
+        psx.cd.mdec_busy_cooldown -= 1;
+    }
+
+    let sample = psx.cd.cdc.run_audio_cycle(psx.cd.mdec_busy_cooldown == 0);
     refresh_irq(psx);
 
     sample
