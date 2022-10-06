@@ -1,3 +1,4 @@
+use crate::psx::cd::disc::SerialNumber;
 use crate::psx::iso9660;
 use cdimage::CdError;
 use std::io;
@@ -11,6 +12,11 @@ pub enum PsxError {
     IoError(#[from] io::Error),
     #[error("We couldn't find the disc's serial number")]
     NoSerialNumber,
+    #[error("Bad CD serial number: expected {expected} got {got}")]
+    BadSerialNumber {
+        expected: SerialNumber,
+        got: SerialNumber,
+    },
     #[error("The provided BIOS is unknown")]
     UnknownBios,
     #[error("We couldn't find a suitable BIOS")]
@@ -29,4 +35,6 @@ pub enum PsxError {
     BadCdcFirmware,
     #[error("We couldn't find a suitable CDC firmware image")]
     NoCdcFirmwareFound,
+    #[error("Deserialization error: {0}")]
+    DeserializationError(String),
 }

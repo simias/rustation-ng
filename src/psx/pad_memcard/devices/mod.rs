@@ -2,22 +2,20 @@ pub mod gamepad;
 pub mod memory_card;
 
 use super::DsrState;
-use gamepad::{Button, ButtonState, GamePad};
-use memory_card::MemoryCardInterface;
-use serde::de::{Deserialize, Deserializer};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use gamepad::{Button, ButtonState};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub struct Peripheral<T: DeviceInterface + ?Sized> {
+pub struct Peripheral {
     /// Connected device
-    device: Box<T>,
+    device: Box<dyn DeviceInterface>,
     /// Counter keeping track of the current position in the reply sequence
     seq: u8,
     /// False if the device is done processing the current command
     active: bool,
 }
 
-impl<T: DeviceInterface + ?Sized> Peripheral<T> {
-    fn new(device: Box<T>) -> Peripheral<T> {
+impl Peripheral {
+    fn new(device: Box<dyn DeviceInterface>) -> Peripheral {
         Peripheral {
             device,
             seq: 0,
@@ -55,45 +53,78 @@ impl<T: DeviceInterface + ?Sized> Peripheral<T> {
     }
 
     /// Return a reference to the connected device
-    pub fn device(&self) -> &T {
+    pub fn device(&self) -> &dyn DeviceInterface {
         &*self.device
     }
 
     /// Return a mutable reference to the connected device
-    pub fn device_mut(&mut self) -> &mut T {
+    pub fn device_mut(&mut self) -> &mut dyn DeviceInterface {
         &mut *self.device
     }
 
-    /// Change the connected device
-    pub fn connect_device(&mut self, device: Box<T>) {
-        self.device = device
+    /// Change the connected device, returning the old one (will return an instance of
+    /// DisconnectedDevice if there was no previously connected device)
+    pub fn connect_device(
+        &mut self,
+        mut device: Box<dyn DeviceInterface>,
+    ) -> Box<dyn DeviceInterface> {
+        std::mem::swap(&mut self.device, &mut device);
+
+        self.device.connected();
+
+        device
+    }
+
+    /// Disconnect the device and return it. Returns an instance of DisconnectedDevice if nothing
+    /// was connected
+    pub fn disconnect_device(&mut self) -> Box<dyn DeviceInterface> {
+        self.connect_device(Box::new(DisconnectedDevice))
     }
 }
 
-impl<T: DeviceInterface + ?Sized> Serialize for Peripheral<T> {
+#[derive(Serialize, Deserialize)]
+struct SerializedPeripheral {
+    seq: u8,
+    active: bool,
+}
+
+impl Serialize for Peripheral {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         // We don't serialize the device, because it could potentially change independently of the
         // savestate (like changing the controller type). At worst it could mean a glitchy
-        let mut state = serializer.serialize_struct("Peripheral", 2)?;
-        state.serialize_field("seq", &self.seq)?;
-        state.serialize_field("active", &self.active)?;
-        state.end()
+        let s = SerializedPeripheral {
+            seq: self.seq,
+            active: self.active,
+        };
+
+        s.serialize(serializer)
     }
 }
 
-impl<'de, T: DeviceInterface + ?Sized> Deserialize<'de> for Peripheral<T> {
-    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+impl<'de> Deserialize<'de> for Peripheral {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        let s = SerializedPeripheral::deserialize(deserializer)?;
+
+        let mut peripheral = Peripheral::new(Box::new(DisconnectedDevice));
+
+        peripheral.seq = s.seq;
+        peripheral.active = s.active;
+
+        Ok(peripheral)
     }
 }
 
-/// Trait used to abstract away the various controller types.
+/// Trait used to abstract away the various device types.
+///
+/// This can be used to implement both controllers and memory cards. Obviously the methods that are
+/// irrelevant for the concrete device should be left unimplemented (no sense getting the
+/// `write_counter` of a DualShock or setting the `axis_state` of a MemoryCard.
 pub trait DeviceInterface {
     /// Human-readable description of the device
     fn description(&self) -> String;
@@ -108,6 +139,34 @@ pub trait DeviceInterface {
     /// Returns a pair `(response, dsr)`. If DSR is false the subsequent command bytes will be
     /// ignored for the current transaction.
     fn handle_command(&mut self, seq: u8, cmd: u8) -> (u8, DsrState);
+
+    /// Set the state of individual buttons
+    fn set_button_state(&mut self, _button: Button, _state: ButtonState) {}
+
+    /// Set the state of the axis. Each pair is `(x, y)`.
+    fn set_axis_state(&mut self, _left: (i16, i16), _right: (i16, i16)) {}
+
+    /// Get rumble state. The first u8 is the big motor in the left handle, the 2nd is the small
+    /// motor in the right handle.
+    fn get_rumble(&self) -> (u8, u8) {
+        (0, 0)
+    }
+
+    /// Dump the entirety of the device's flash (if it exists). Probably only useful for Memory
+    /// Cards.
+    fn get_memory(&self) -> Option<&[u8; memory_card::FLASH_SIZE]> {
+        None
+    }
+
+    /// Returns the value of a counter that's incremented every time the memory card's flash is
+    /// written (unless the write didn't change the flash contents, in which case it's ignored).
+    /// Can be used to check if the contents of the memory card should be written to disk.
+    fn write_counter(&self) -> u32 {
+        0
+    }
+
+    /// Called when the device is connected to a console
+    fn connected(&mut self) {}
 }
 
 /// Dummy profile emulating an empty pad or memory card slot
@@ -124,24 +183,10 @@ impl DeviceInterface for DisconnectedDevice {
     }
 }
 
-impl GamePad for DisconnectedDevice {
-    fn set_button_state(&mut self, _: Button, _: ButtonState) {}
-}
-
-impl MemoryCardInterface for DisconnectedDevice {
-    fn get_memory(&self) -> Option<&[u8; memory_card::FLASH_SIZE]> {
-        None
-    }
-
-    fn write_counter(&self) -> u32 {
-        0
-    }
-}
-
-pub fn disconnected_gamepad() -> Peripheral<dyn GamePad> {
+pub fn disconnected_gamepad() -> Peripheral {
     Peripheral::new(Box::new(DisconnectedDevice))
 }
 
-pub fn disconnected_memory_card() -> Peripheral<dyn MemoryCardInterface> {
+pub fn disconnected_memory_card() -> Peripheral {
     Peripheral::new(Box::new(DisconnectedDevice))
 }

@@ -12,7 +12,7 @@ use shaman::{digest::Digest, sha2::Sha256};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct CdInterface {
-    cdc: cdc::Cdc,
+    pub cdc: cdc::Cdc,
     irq_active: bool,
     /// Counter to prevent overclocking the CDC when the MDEC is active (since it's probably
     /// streaming data from the CD)
@@ -57,9 +57,7 @@ impl CdInterface {
             };
         }
 
-        let mut cdc = cdc::Cdc::new(&cdc_rom, disc);
-
-        cdc.set_shell_open(false);
+        let cdc = cdc::Cdc::new(&cdc_rom, disc);
 
         let irq_active = cdc.irq_active();
 

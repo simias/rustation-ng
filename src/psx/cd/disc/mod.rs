@@ -3,9 +3,9 @@ use crate::error::{PsxError, Result};
 use crate::psx::gpu::VideoStandard;
 pub use cache::Cache as CdCache;
 use cache::CachedResult;
-use cdimage::{Bcd, DiscPosition, Image, Msf, Sector};
+use cdimage::{Bcd, CdResult, DiscPosition, Image, Msf, Sector, Toc};
 use serde::de::{Deserialize, Deserializer};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
 mod cache;
@@ -33,6 +33,14 @@ impl Disc {
         Ok(disc)
     }
 
+    /// Instantiate a placeholder disc that will generate errors when used
+    fn new_placeholder(serial: SerialNumber, toc: Toc) -> Disc {
+        Disc {
+            cache: CdCache::new_with_toc(Box::new(DummyImage), toc),
+            serial,
+        }
+    }
+
     pub fn read_sector(&mut self, dp: DiscPosition) -> CachedResult<Sector> {
         self.cache.read_sector(dp)
     }
@@ -51,24 +59,34 @@ impl Disc {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SerializedDisc {
+    serial: SerialNumber,
+    toc: Toc,
+}
+
 impl Serialize for Disc {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // We only serialize the serial number to make sure that we're reloaded with the same disc
-        let mut state = serializer.serialize_struct("Disc", 1)?;
-        state.serialize_field("serial", &self.serial)?;
-        state.end()
+        let s = SerializedDisc {
+            serial: self.serial,
+            toc: self.cache.toc().clone(),
+        };
+
+        s.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for Disc {
-    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        let s = SerializedDisc::deserialize(deserializer)?;
+
+        Ok(Disc::new_placeholder(s.serial, s.toc))
     }
 }
 
@@ -150,6 +168,12 @@ impl SerialNumber {
 impl fmt::Display for SerialNumber {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+
+impl fmt::Debug for SerialNumber {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
@@ -262,4 +286,21 @@ fn read_system_cnf(image: &mut CdCache) -> Result<Vec<u8>> {
     let system_cnf = system_cnf.read_file(image)?;
 
     Ok(system_cnf)
+}
+
+/// A placeholder disc image that crashes if we attempt to use it
+struct DummyImage;
+
+impl Image for DummyImage {
+    fn image_format(&self) -> String {
+        "Placeholder disc".to_string()
+    }
+
+    fn read_sector(&mut self, _position: DiscPosition) -> CdResult<Sector> {
+        unimplemented!("Attempted to read a placeholder disc image")
+    }
+
+    fn toc(&self) -> &Toc {
+        unimplemented!("Attempted to read the ToC of a placeholder disc image")
+    }
 }

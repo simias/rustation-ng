@@ -4,8 +4,8 @@
 use super::bios::BIOS_SIZE;
 use super::{cpu, AccessWidth, Addressable};
 use crate::box_array::BoxArray;
-use serde::de::{Deserialize, Deserializer};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use crate::error::{PsxError, Result};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use shaman::digest::Digest;
 use shaman::sha2::Sha256;
 
@@ -82,6 +82,28 @@ impl XMemory {
         let mut hasher = Sha256::new();
         hasher.input(bios);
         hasher.result(&mut self.bios_sha256);
+    }
+
+    /// Copy the BIOS from another XMemory instance, returning an error if the checksums differ
+    pub fn copy_bios(&mut self, source: &XMemory) -> Result<()> {
+        let bios_base = ((MemoryPage::Bios as usize) << PAGE_SHIFT) / 4;
+        let bios_len = BIOS_SIZE / 4;
+
+        if self.bios_sha256 != source.bios_sha256 && self.bios_sha256.iter().any(|&b| b != 0) {
+            return Err(PsxError::BadBios("BIOS SHA-256 don't match".to_string()));
+        }
+
+        for (i, &w) in source
+            .memory
+            .iter()
+            .enumerate()
+            .skip(bios_base)
+            .take(bios_len)
+        {
+            self.memory[i] = w;
+        }
+
+        Ok(())
     }
 
     /// Fetch data from memory at `offset`
@@ -186,32 +208,52 @@ impl XMemory {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerializedMemory {
+    ram: BoxArray<u32, RAM_SIZE_WORDS>,
+    bios_sha256: [u8; 32],
+}
+
 impl Serialize for XMemory {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("XMemory", 2)?;
+        let ram_base = ((MemoryPage::Ram as usize) << PAGE_SHIFT) / 4;
+        let ram_len = RAM_SIZE / 4;
+        let ram: Vec<_> = self
+            .memory
+            .iter()
+            .skip(ram_base)
+            .take(ram_len)
+            .cloned()
+            .collect();
 
-        {
-            let ram_base = (MemoryPage::Ram as usize) << PAGE_SHIFT;
-            let ram_end = ram_base + RAM_SIZE / 4;
+        let s = SerializedMemory {
+            ram: BoxArray::from_vec(ram),
+            bios_sha256: self.bios_sha256,
+        };
 
-            state.serialize_field("ram", &self.memory[ram_base..ram_end])?;
-        }
-
-        state.serialize_field("bios_sha256", &self.bios_sha256)?;
-
-        state.end()
+        s.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for XMemory {
-    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        let s = SerializedMemory::deserialize(deserializer)?;
+
+        let mut xmem = XMemory::new();
+
+        xmem.bios_sha256 = s.bios_sha256;
+
+        for (i, &w) in s.ram.iter().enumerate() {
+            xmem.ram_store((i * 4) as u32, w);
+        }
+
+        Ok(xmem)
     }
 }
 
@@ -244,6 +286,9 @@ const REGION_OFFSETS: [u32; 3] = [0x0000_0000, 0x8000_0000, 0xa000_0000];
 
 /// System RAM: 2MB
 const RAM_SIZE: usize = 2 * 1024 * 1024;
+
+/// RAM size in number of 32bit words
+const RAM_SIZE_WORDS: usize = RAM_SIZE / 4;
 
 /// Total size of the memory buffer, in 32bit words
 const MEMORY_SIZE: usize = (PAGE_SIZE_BYTES * 3) >> 2;

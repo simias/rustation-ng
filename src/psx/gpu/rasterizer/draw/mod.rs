@@ -134,6 +134,27 @@ impl Rasterizer {
         }
     }
 
+    /// Attempt to load a rasterizer from the given state. Returns None in case of error.
+    pub fn from_serialized(buf: &[u8]) -> Option<Rasterizer> {
+        use serde::Deserialize;
+
+        let fbr = match flexbuffers::Reader::get_root(buf) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to load rasterizer state: {}", e);
+                return None;
+            }
+        };
+
+        match Rasterizer::deserialize(fbr) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                error!("Failed to load rasterizer state: {}", e);
+                None
+            }
+        }
+    }
+
     pub fn run(
         &mut self,
         command_channel: mpsc::Receiver<CommandBuffer>,

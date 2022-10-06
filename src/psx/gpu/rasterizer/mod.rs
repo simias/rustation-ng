@@ -6,8 +6,7 @@ mod draw;
 
 pub use draw::Pixel;
 use draw::Rasterizer;
-use serde::de::{Deserialize, Deserializer};
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::mpsc;
 use std::thread;
 
@@ -123,6 +122,12 @@ impl ::std::ops::Drop for Handle {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerializedHandle {
+    command_buffer: CommandBuffer,
+    rasterizer_state: Vec<u8>,
+}
+
 impl Serialize for Handle {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -133,28 +138,42 @@ impl Serialize for Handle {
 
         self.command_channel.send(cmd).unwrap();
 
-        let mut state = serializer.serialize_struct("Handle", 2)?;
+        let command_buffer = self.command_buffer.clone();
+        let rasterizer_state = self.serialization_channel.recv().unwrap();
 
-        state.serialize_field("command_buffer", &self.command_buffer)?;
+        let s = SerializedHandle {
+            command_buffer,
+            rasterizer_state,
+        };
 
-        let rs = self.serialization_channel.recv().unwrap();
-        state.serialize_field("rasterizer_state", &rs)?;
-
-        state.end()
+        s.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for Handle {
-    fn deserialize<D>(_deserializer: D) -> Result<Handle, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Handle, D::Error>
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        use serde::de;
+
+        let s = SerializedHandle::deserialize(deserializer)?;
+
+        let rasterizer = match Rasterizer::from_serialized(&s.rasterizer_state) {
+            Some(r) => r,
+            None => {
+                return Err(de::Error::invalid_value(
+                    de::Unexpected::Bytes(&s.rasterizer_state),
+                    &"invalid or corrupted rasterizer state",
+                ));
+            }
+        };
+
+        Ok(start_from_state(s.command_buffer, rasterizer))
     }
 }
 
-/// Starts the rasterizer thread and returns a handle to it
-pub fn start() -> Handle {
+pub fn start_from_state(command_buffer: CommandBuffer, mut rasterizer: Rasterizer) -> Handle {
     let (command_sender, command_receiver) = mpsc::channel();
     let (frame_sender, frame_receiver) = mpsc::channel();
     let (serialization_sender, serialization_receiver) = mpsc::channel();
@@ -165,7 +184,6 @@ pub fn start() -> Handle {
 
     let handle = builder
         .spawn(move || {
-            let mut rasterizer = Rasterizer::new();
             rasterizer.run(command_receiver, frame_sender, serialization_sender);
         })
         .unwrap();
@@ -173,13 +191,18 @@ pub fn start() -> Handle {
     let dummy_frame = Frame::new(0, 0);
 
     Handle {
-        command_buffer: Vec::new(),
+        command_buffer,
         last_frame: LastFrame::Frame(dummy_frame),
         handle: Some(handle),
         command_channel: command_sender,
         frame_channel: frame_receiver,
         serialization_channel: serialization_receiver,
     }
+}
+
+/// Starts a new rasterizer thread and returns a handle to it
+pub fn start() -> Handle {
+    start_from_state(Vec::new(), Rasterizer::new())
 }
 
 type CommandBuffer = Vec<Command>;

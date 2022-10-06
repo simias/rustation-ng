@@ -2,16 +2,6 @@ use super::{DeviceInterface, DsrState};
 use crate::box_array::BoxArray;
 use crate::psx::CycleCount;
 
-pub trait MemoryCardInterface: DeviceInterface {
-    /// Dump the entirety of the memory card's flash (if it exists)
-    fn get_memory(&self) -> Option<&[u8; FLASH_SIZE]>;
-
-    /// Returns the value of a counter that's incremented every time the memory card's flash is
-    /// written (unless the write didn't change the flash contents, in which case it's ignored).
-    /// Can be used to check if the contents of the memory card should be written to disk.
-    fn write_counter(&self) -> u32;
-}
-
 /// The standard SCPH-1020 memory card
 pub struct MemoryCard {
     /// The non-volatile Flash memory itself
@@ -19,7 +9,7 @@ pub struct MemoryCard {
     /// Write counter, incremented every time the memory is written to *if* the contents of the
     /// flash have been changed.
     write_counter: u32,
-    /// Set to true after the first succesful write to flash
+    /// Set to true after the first successful write to flash
     has_been_written: bool,
     /// Type of memory card access for the current command
     access_type: AccessType,
@@ -365,15 +355,22 @@ impl DeviceInterface for MemoryCard {
 
         (resp, dsr_state)
     }
-}
 
-impl MemoryCardInterface for MemoryCard {
     fn get_memory(&self) -> Option<&[u8; FLASH_SIZE]> {
         Some(&self.memory)
     }
 
     fn write_counter(&self) -> u32 {
         self.write_counter
+    }
+
+    fn connected(&mut self) {
+        // This may prevent *some* data corruption when a savestate is loaded (since it triggers a
+        // reconnection). The idea is that if the BIOS sees that the write flag has been reset it
+        // will *probably* think it's a new memory card and reload all the contents.
+        //
+        // Of course if the savestate was made during a memory card access, all bets are off.
+        self.has_been_written = false;
     }
 }
 

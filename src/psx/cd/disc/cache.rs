@@ -22,6 +22,10 @@ impl Cache {
     pub fn new(image: Box<dyn Image + Send>) -> Cache {
         let toc = image.toc().clone();
 
+        Cache::new_with_toc(image, toc)
+    }
+
+    pub fn new_with_toc(image: Box<dyn Image + Send>, toc: Toc) -> Cache {
         let reader = Arc::new((Mutex::new(Reader::new()), Condvar::new()));
 
         let thread_reader = reader.clone();

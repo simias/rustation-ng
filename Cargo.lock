@@ -86,7 +86,7 @@ dependencies = [
 [[package]]
 name = "cdimage"
 version = "0.1.0"
-source = "git+https://github.com/simias/cdimage?branch=master#d4a70a8f61a082241c1c0ea577098e3ea471e867"
+source = "git+https://github.com/simias/cdimage?branch=master#f2d383d06b85a2544551345b0da3523bb8bdd883"
 dependencies = [
  "arrayref",
  "serde",

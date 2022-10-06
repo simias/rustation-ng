@@ -202,6 +202,25 @@ impl Uc {
         debug_assert!(i == ROM_DUMP_SIZE);
     }
 
+    /// Copy the ROM from another Uc instance
+    pub fn copy_rom(&mut self, source: &Uc) {
+        for addr in map::MASK_ROM.iter() {
+            self.memory[addr] = source.memory[addr];
+        }
+
+        for addr in map::SELF_CHECK_ROM.iter() {
+            self.memory[addr] = source.memory[addr];
+        }
+
+        for addr in map::TEST_VECTORS.iter() {
+            self.memory[addr] = source.memory[addr];
+        }
+
+        for addr in map::USER_VECTORS.iter() {
+            self.memory[addr] = source.memory[addr];
+        }
+    }
+
     fn vector_address(&self, vector: IrqVector) -> u16 {
         let addr = map::USER_VECTORS.start() + vector as usize;
         let hi = self.memory[addr] as u16;
@@ -1260,12 +1279,8 @@ mod map {
             self.0 as usize
         }
 
-        pub const fn end(self) -> usize {
-            self.1 as usize
-        }
-
         pub const fn len(self) -> usize {
-            self.end() - self.start()
+            self.1 as usize
         }
     }
 
@@ -1320,29 +1335,41 @@ const UC_CYCLES_PER_AUDIO_CYCLE: u32 = UC_FREQ / 44_100;
 
 mod serialize_memory {
     use super::map::RAM;
-    use serde::{
-        de::Deserializer,
-        ser::{SerializeSeq, Serializer},
-    };
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct SerializedRam {
+        #[serde(with = "serde_big_array::BigArray")]
+        ram: [u8; RAM.len()],
+    }
 
     pub fn serialize<S>(mem: &[u8; 0x1_0000], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // We only need to serialize the RAM, the rest is ROM
-        let mut seq = serializer.serialize_seq(Some(RAM.len()))?;
+        let mut ram = [0; RAM.len()];
 
-        for b in mem.iter().skip(RAM.start()).take(RAM.len()) {
-            seq.serialize_element(b)?;
+        for (i, &b) in mem.iter().skip(RAM.start()).take(RAM.len()).enumerate() {
+            ram[i] = b;
         }
 
-        seq.end()
+        let s = SerializedRam { ram };
+
+        s.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(_deserializer: D) -> Result<[u8; 0x1_0000], D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 0x1_0000], D::Error>
     where
         D: Deserializer<'de>,
     {
-        todo!()
+        let s = SerializedRam::deserialize(deserializer)?;
+
+        let mut ram = [0x90; 0x1_0000];
+
+        for (i, &b) in s.ram.iter().enumerate() {
+            ram[RAM.start() + i] = b
+        }
+
+        Ok(ram)
     }
 }

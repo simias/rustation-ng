@@ -35,18 +35,6 @@ impl ButtonState {
     }
 }
 
-pub trait GamePad: DeviceInterface {
-    /// Set the state of individual buttons
-    fn set_button_state(&mut self, button: Button, state: ButtonState);
-    /// Set the state of the axis. Each pair is `(x, y)`.
-    fn set_axis_state(&mut self, _left: (i16, i16), _right: (i16, i16)) {}
-    /// Get rumble state. The first u8 is the big motor in the left handle, the 2nd is the small
-    /// motor in the right handle.
-    fn get_rumble(&self) -> (u8, u8) {
-        (0, 0)
-    }
-}
-
 /// SCPH-1080: Digital gamepad.
 ///
 /// Full state is only two bytes since we only need one bit per button.
@@ -55,27 +43,6 @@ pub struct DigitalPad(u16);
 impl DigitalPad {
     pub fn new() -> DigitalPad {
         DigitalPad(0xffff)
-    }
-}
-
-impl GamePad for DigitalPad {
-    fn set_button_state(&mut self, button: Button, state: ButtonState) {
-        if button == Button::Analog {
-            // No analog button on the digital pad
-            return;
-        }
-
-        let s = self.0;
-
-        let mask = 1 << (button as usize);
-
-        self.0 = match state {
-            ButtonState::Pressed => s & !mask,
-            ButtonState::Released => s | mask,
-        };
-
-        // Digital pads don't support L3/R3, so those bits are always set to 1
-        self.0 |= 0x6;
     }
 }
 
@@ -117,6 +84,25 @@ impl DeviceInterface for DigitalPad {
         };
 
         (resp, dsr_state)
+    }
+
+    fn set_button_state(&mut self, button: Button, state: ButtonState) {
+        if button == Button::Analog {
+            // No analog button on the digital pad
+            return;
+        }
+
+        let s = self.0;
+
+        let mask = 1 << (button as usize);
+
+        self.0 = match state {
+            ButtonState::Pressed => s & !mask,
+            ButtonState::Released => s | mask,
+        };
+
+        // Digital pads don't support L3/R3, so those bits are always set to 1
+        self.0 |= 0x6;
     }
 }
 
@@ -478,99 +464,6 @@ impl DualShock {
     }
 }
 
-impl GamePad for DualShock {
-    fn set_button_state(&mut self, button: Button, state: ButtonState) {
-        if button == Button::Analog {
-            let was_pressed = self.analog_pressed;
-
-            self.analog_pressed = state.is_pressed();
-
-            if !self.analog_mode_locked && !was_pressed && self.analog_pressed {
-                // Analog button was just pressed and the mode isn't locked, toggle analog mode
-                self.analog_mode = !self.analog_mode;
-            }
-
-            return;
-        }
-
-        let s = self.buttons;
-
-        let mask = 1 << (button as usize);
-
-        self.buttons = match state {
-            ButtonState::Pressed => s & !mask,
-            ButtonState::Released => s | mask,
-        };
-    }
-
-    fn set_axis_state(&mut self, left: (i16, i16), right: (i16, i16)) {
-        // Here's how the calibration works: at the start left_stick_radius and
-        // right_stick_radius are set to a small-ish value. Every time we receive controller
-        // axis input from the frontend we compute the current distance between the center and
-        // the current position. If it's greater than the corresponding *_stick_radius we
-        // update it. This way we should quickly get a good estimate of the effective stick radius
-        // of the controller we're using (at least once the user bothers to reach the full range of
-        // the stick).
-        fn radius(pos: (i16, i16)) -> f32 {
-            let x = (pos.0 as f32) / (i16::max_value() as f32);
-            let y = (pos.1 as f32) / (i16::max_value() as f32);
-
-            (x * x + y * y).sqrt()
-        }
-
-        let left_radius = radius(left);
-        if left_radius > self.left_stick_radius {
-            self.left_stick_radius = left_radius;
-        }
-
-        let right_radius = radius(right);
-        if right_radius > self.right_stick_radius {
-            self.right_stick_radius = right_radius;
-        }
-
-        // This represents the maximal value the DualShock sticks can reach, where 1.0 would be the
-        // maximum value along the X or Y axis. On my DualShock I can *almost* reach the corner of
-        // the square (I read x = 0x00, y = 0x05)
-        const DUALSHOCK_ANALOG_RADIUS: f32 = 1.387;
-
-        // Now that we know both the real and emulated radii we can scale the values we've received
-        // to compensate
-        let l_scaling = DUALSHOCK_ANALOG_RADIUS / self.left_stick_radius;
-        let r_scaling = DUALSHOCK_ANALOG_RADIUS / self.right_stick_radius;
-
-        fn scale(v: i16, scaling: f32) -> u8 {
-            let mut v = f32::from(v) * scaling;
-
-            // The frontend sends us 16bits of resolution per axis but the PSX only uses 8, so we
-            // scale down
-            v /= 0x100 as f32;
-
-            // The pad returns 0x80 at 0 so we need to offset
-            v += 0x80 as f32;
-
-            let v = v as i32;
-
-            if v > 0xff {
-                0xffu8
-            } else if v < 0 {
-                0
-            } else {
-                v as u8
-            }
-        }
-
-        self.left_stick = (scale(left.0, l_scaling), scale(left.1, l_scaling));
-        self.right_stick = (scale(right.0, r_scaling), scale(right.1, r_scaling));
-
-        // XXX assume that this function is called exactly once per frame
-        self.run_frame();
-    }
-
-    fn get_rumble(&self) -> (u8, u8) {
-        self.rumble
-    }
-}
-
 impl DeviceInterface for DualShock {
     fn description(&self) -> String {
         "PlayStation DualShock Analog Controller (SCPH-1200)".to_string()
@@ -677,6 +570,97 @@ impl DeviceInterface for DualShock {
         };
 
         (resp, dsr_state)
+    }
+
+    fn set_button_state(&mut self, button: Button, state: ButtonState) {
+        if button == Button::Analog {
+            let was_pressed = self.analog_pressed;
+
+            self.analog_pressed = state.is_pressed();
+
+            if !self.analog_mode_locked && !was_pressed && self.analog_pressed {
+                // Analog button was just pressed and the mode isn't locked, toggle analog mode
+                self.analog_mode = !self.analog_mode;
+            }
+
+            return;
+        }
+
+        let s = self.buttons;
+
+        let mask = 1 << (button as usize);
+
+        self.buttons = match state {
+            ButtonState::Pressed => s & !mask,
+            ButtonState::Released => s | mask,
+        };
+    }
+
+    fn set_axis_state(&mut self, left: (i16, i16), right: (i16, i16)) {
+        // Here's how the calibration works: at the start left_stick_radius and
+        // right_stick_radius are set to a small-ish value. Every time we receive controller
+        // axis input from the frontend we compute the current distance between the center and
+        // the current position. If it's greater than the corresponding *_stick_radius we
+        // update it. This way we should quickly get a good estimate of the effective stick radius
+        // of the controller we're using (at least once the user bothers to reach the full range of
+        // the stick).
+        fn radius(pos: (i16, i16)) -> f32 {
+            let x = (pos.0 as f32) / (i16::max_value() as f32);
+            let y = (pos.1 as f32) / (i16::max_value() as f32);
+
+            (x * x + y * y).sqrt()
+        }
+
+        let left_radius = radius(left);
+        if left_radius > self.left_stick_radius {
+            self.left_stick_radius = left_radius;
+        }
+
+        let right_radius = radius(right);
+        if right_radius > self.right_stick_radius {
+            self.right_stick_radius = right_radius;
+        }
+
+        // This represents the maximal value the DualShock sticks can reach, where 1.0 would be the
+        // maximum value along the X or Y axis. On my DualShock I can *almost* reach the corner of
+        // the square (I read x = 0x00, y = 0x05)
+        const DUALSHOCK_ANALOG_RADIUS: f32 = 1.387;
+
+        // Now that we know both the real and emulated radii we can scale the values we've received
+        // to compensate
+        let l_scaling = DUALSHOCK_ANALOG_RADIUS / self.left_stick_radius;
+        let r_scaling = DUALSHOCK_ANALOG_RADIUS / self.right_stick_radius;
+
+        fn scale(v: i16, scaling: f32) -> u8 {
+            let mut v = f32::from(v) * scaling;
+
+            // The frontend sends us 16bits of resolution per axis but the PSX only uses 8, so we
+            // scale down
+            v /= 0x100 as f32;
+
+            // The pad returns 0x80 at 0 so we need to offset
+            v += 0x80 as f32;
+
+            let v = v as i32;
+
+            if v > 0xff {
+                0xffu8
+            } else if v < 0 {
+                0
+            } else {
+                v as u8
+            }
+        }
+
+        self.left_stick = (scale(left.0, l_scaling), scale(left.1, l_scaling));
+        self.right_stick = (scale(right.0, r_scaling), scale(right.1, r_scaling));
+
+        // XXX assume that this function is called exactly once per frame
+        self.run_frame();
+    }
+
+    fn get_rumble(&self) -> (u8, u8) {
+        self.rumble
     }
 }
 

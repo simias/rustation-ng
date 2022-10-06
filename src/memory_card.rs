@@ -2,7 +2,8 @@
 
 use crate::box_array::BoxArray;
 use crate::libretro;
-use crate::psx::pad_memcard::devices::memory_card::{MemoryCard, MemoryCardInterface, FLASH_SIZE};
+use crate::psx::pad_memcard::devices::memory_card::{MemoryCard, FLASH_SIZE};
+use crate::psx::pad_memcard::devices::DeviceInterface;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
@@ -100,7 +101,7 @@ impl MemoryCardFile {
     }
 
     /// Check if the memory card contents need to be backed up. Should be called once per frame.
-    pub fn maybe_dump(&mut self, mc: &dyn MemoryCardInterface) {
+    pub fn maybe_dump(&mut self, mc: &dyn DeviceInterface) {
         let new_write_counter = mc.write_counter();
 
         let new_write = new_write_counter != self.last_write_counter;
@@ -138,7 +139,7 @@ impl MemoryCardFile {
 
     /// Like `maybe_dump` but never postpone a Memory Card dump if one is pending. Can be used
     /// before quitting the emulator or changing memory cards.
-    pub fn force_dump(&mut self, mc: &dyn MemoryCardInterface) {
+    pub fn force_dump(&mut self, mc: &dyn DeviceInterface) {
         self.maybe_dump(mc);
 
         if self.write_pending_since.is_some() {
@@ -148,7 +149,7 @@ impl MemoryCardFile {
     }
 
     /// Dump the memory card to disk if a write is pending
-    fn dump(&mut self, mc: &dyn MemoryCardInterface) {
+    fn dump(&mut self, mc: &dyn DeviceInterface) {
         let memory = match mc.get_memory() {
             Some(m) => m,
             // That shouldn't happen, probably?

@@ -16,12 +16,11 @@ mod sync;
 mod timers;
 mod xmem;
 
-use std::cmp::min;
-
-use crate::error::Result;
-
+use crate::error::{PsxError, Result};
 pub use cd::{disc, iso9660, CDC_ROM_SHA256, CDC_ROM_SIZE};
 pub use gpu::{Frame, VideoStandard};
+use serde::de::{Deserialize, Deserializer};
+use std::cmp::min;
 
 /// Type alias used to represent a number of clock cycles
 pub type CycleCount = i32;
@@ -108,6 +107,59 @@ impl Psx {
             dma_timing_penalty: 0,
             cpu_stalled_for_dma: false,
         })
+    }
+
+    /// Deserialize a Psx from the given object and transfer our disc, BIOS and CDC ROM to it, then
+    /// replace our current state with the deserialized one.
+    ///
+    /// Will generate an error if there's a mismatch (that is, if the serialized Psx used a
+    /// different disc, BIOS or ROM). In this case the state remains unchanged.
+    pub fn deserialize_and_load<'de, D>(&mut self, reader: D) -> Result<()>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut psx = Box::<Psx>::deserialize(reader)
+            .map_err(|e| PsxError::DeserializationError(format!("{}", e)))?;
+
+        psx.xmem.copy_bios(&self.xmem)?;
+        psx.cd.cdc.copy_rom(&self.cd.cdc);
+
+        if let Err((e, disc)) = psx.cd.cdc.set_disc(self.cd.cdc.take_disc()) {
+            // Take the disc back
+            self.cd
+                .cdc
+                .set_disc(disc)
+                .map_err(|(e, _d)| e)
+                .expect("Couldn't reload the disc!");
+
+            return Err(e);
+        }
+
+        // Move pads to the new instance
+        {
+            let mut old_pads = self.pad_memcard.gamepads_mut();
+            let mut new_pads = psx.pad_memcard.gamepads_mut();
+
+            for (old, new) in old_pads.iter_mut().zip(new_pads.iter_mut()) {
+                let pad = old.disconnect_device();
+                new.connect_device(pad);
+            }
+        }
+
+        // Move memory cards to the new instance
+        {
+            let mut old_mc = self.pad_memcard.memory_cards_mut();
+            let mut new_mc = psx.pad_memcard.memory_cards_mut();
+
+            for (old, new) in old_mc.iter_mut().zip(new_mc.iter_mut()) {
+                let mc = old.disconnect_device();
+                new.connect_device(mc);
+            }
+        }
+
+        *self = *psx;
+
+        Ok(())
     }
 
     pub fn video_standard(&self) -> VideoStandard {

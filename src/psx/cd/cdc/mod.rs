@@ -4,6 +4,7 @@ mod resampler;
 mod uc;
 
 use super::Disc;
+use crate::PsxError;
 use cdimage::Sector;
 pub use uc::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
@@ -37,7 +38,41 @@ impl Cdc {
         let position = "+05:00:00".parse().expect("Bad starting position");
         dsp::set_position(&mut cdc, position);
 
+        cdc.set_shell_open(cdc.disc.is_none());
+
         cdc
+    }
+
+    /// Remove the disc and emulate an open tray
+    pub fn take_disc(&mut self) -> Option<Disc> {
+        self.set_shell_open(true);
+
+        self.disc.take()
+    }
+
+    /// Attempt to load a disc. If a `disc` is `Some` and disc is already loaded and its serial
+    /// number is different from the new one, generate an error (used for savestate loading).
+    ///
+    /// If you want to emulate disc switching you should call `take_disc` and wait for at least a few
+    /// hundred milliseconds of emulated time for the firmware to take note of the disc change.
+    pub fn set_disc(&mut self, disc: Option<Disc>) -> Result<(), (PsxError, Option<Disc>)> {
+        if let (Some(old_disc), Some(new_disc)) = (&self.disc, &disc) {
+            if old_disc.serial_number() != new_disc.serial_number() {
+                return Err((
+                    PsxError::BadSerialNumber {
+                        expected: old_disc.serial_number(),
+                        got: new_disc.serial_number(),
+                    },
+                    disc,
+                ));
+            }
+        };
+
+        self.disc = disc;
+
+        self.set_shell_open(self.disc.is_none());
+
+        Ok(())
     }
 
     pub fn disc_present(&self) -> bool {
@@ -144,6 +179,11 @@ impl Cdc {
     /// Called when the DSP reads a new sector
     fn dsp_sector_read(&mut self, sector: Sector) {
         decoder::dsp_sector_read(self, sector);
+    }
+
+    /// Copy the ROM from another CD controller instance
+    pub fn copy_rom(&mut self, source: &Cdc) {
+        self.uc.copy_rom(&source.uc)
     }
 }
 

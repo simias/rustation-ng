@@ -58,8 +58,8 @@ use psx::bios::Metadata;
 use psx::bios::{Bios, BIOS_SIZE};
 use psx::disc::Disc;
 use psx::gpu::RasterizerOption;
-use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock, GamePad};
-use psx::pad_memcard::devices::DisconnectedDevice;
+use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock};
+use psx::pad_memcard::devices::{DeviceInterface, DisconnectedDevice};
 use psx::{CDC_ROM_SHA256, CDC_ROM_SIZE};
 use shaman::{digest::Digest, sha2::Sha256};
 use std::fs::File;
@@ -82,7 +82,7 @@ const SYSTEM_INFO: libretro::SystemInfo = libretro::SystemInfo {
 
 /// Emulation context containing the emulator state
 struct Context {
-    psx: psx::Psx,
+    psx: Box<psx::Psx>,
     disc_path: PathBuf,
     /// The type of controller connected on the two input ports
     controller_type: [libretro::InputDevice; 2],
@@ -212,7 +212,7 @@ impl Context {
         }
     }
 
-    fn load_disc(disc: &Path) -> Result<psx::Psx> {
+    fn load_disc(disc: &Path) -> Result<Box<psx::Psx>> {
         let image = if disc.extension().and_then(|ext| ext.to_str()) == Some("cue") {
             Cue::new(disc)
         } else {
@@ -231,7 +231,7 @@ impl Context {
 
         let cdc_firmware = find_cdc_firmware()?;
 
-        let psx = psx::Psx::new_with_disc(disc, bios, cdc_firmware)?;
+        let psx = Box::new(psx::Psx::new_with_disc(disc, bios, cdc_firmware)?);
 
         Ok(psx)
     }
@@ -407,7 +407,7 @@ impl libretro::Context for Context {
 
         let gamepads = self.psx.pad_memcard.gamepads_mut();
 
-        let new_pad: Box<dyn GamePad> = match subclass {
+        let new_pad: Box<dyn DeviceInterface> = match subclass {
             PSX_CONTROLLER_DIGITAL => Box::new(DigitalPad::new()),
             PSX_CONTROLLER_DUALSHOCK => Box::new(DualShock::new()),
             _ => {
@@ -551,12 +551,48 @@ impl libretro::Context for Context {
             return Err(());
         }
 
-        buf[..fbuf.len()].clone_from_slice(fbuf);
+        buf[0] = b'R';
+        buf[1] = b'S';
+        buf[2] = b'X';
+        buf[3] = b'1';
+
+        let len = (fbuf.len() as u32).to_le_bytes();
+
+        buf[4] = len[0];
+        buf[5] = len[1];
+        buf[6] = len[2];
+        buf[7] = len[3];
+
+        buf[8..(8 + fbuf.len())].clone_from_slice(fbuf);
 
         Ok(())
     }
 
-    fn unserialize(&mut self, _buf: &[u8]) -> ::std::result::Result<(), ()> {
+    fn unserialize(&mut self, buf: &[u8]) -> ::std::result::Result<(), ()> {
+        if buf[0..4] != *b"RSX1" {
+            error!("Failed to load savestate: bad magic");
+            return Err(());
+        }
+
+        let len = u32::from_le_bytes(*array_ref![buf, 4, 4]) as usize;
+
+        let buf = &buf[8..(8 + len)];
+
+        let fbr = match flexbuffers::Reader::get_root(buf) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to load savestate: {}", e);
+                return Err(());
+            }
+        };
+
+        if let Err(e) = self.psx.deserialize_and_load(fbr) {
+            error!("Failed to load savestate: {}", e);
+            return Err(());
+        };
+
+        libretro::Context::refresh_variables(self);
+
         Ok(())
     }
 }

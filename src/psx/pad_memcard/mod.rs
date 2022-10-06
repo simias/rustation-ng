@@ -5,8 +5,6 @@ pub mod devices;
 use super::{irq, sync, AccessWidth, Addressable, CycleCount, Psx};
 use irq::Interrupt;
 
-use self::devices::gamepad::GamePad;
-use self::devices::memory_card::MemoryCardInterface;
 use self::devices::Peripheral;
 
 const PADSYNC: sync::SyncToken = sync::SyncToken::PadMemCard;
@@ -48,16 +46,16 @@ pub struct PadMemCard {
     /// True when we the RX FIFO is not empty.
     rx_not_empty: bool,
     /// Gamepad in slot 1
-    pad1: Peripheral<dyn GamePad>,
+    pad1: Peripheral,
     pad1_dsr: DsrState,
     /// Gamepad in slot 2
-    pad2: Peripheral<dyn GamePad>,
+    pad2: Peripheral,
     pad2_dsr: DsrState,
     /// Memory Card in slot 1
-    memcard1: Peripheral<dyn MemoryCardInterface>,
+    memcard1: Peripheral,
     memcard1_dsr: DsrState,
     /// Memory Card in slot 2
-    memcard2: Peripheral<dyn MemoryCardInterface>,
+    memcard2: Peripheral,
     memcard2_dsr: DsrState,
     /// Bus state machine
     transfer_state: TransferState,
@@ -91,17 +89,17 @@ impl PadMemCard {
     }
 
     /// Return a mutable reference to the gamepad peripherals being used.
-    pub fn gamepads_mut(&mut self) -> [&mut Peripheral<dyn GamePad>; 2] {
+    pub fn gamepads_mut(&mut self) -> [&mut Peripheral; 2] {
         [&mut self.pad1, &mut self.pad2]
     }
 
     /// Return a reference to the memory card peripherals being used.
-    pub fn memory_cards(&self) -> [&Peripheral<dyn MemoryCardInterface>; 2] {
+    pub fn memory_cards(&self) -> [&Peripheral; 2] {
         [&self.memcard1, &self.memcard2]
     }
 
     /// Return a mutable reference to the memory card peripherals being used.
-    pub fn memory_cards_mut(&mut self) -> [&mut Peripheral<dyn MemoryCardInterface>; 2] {
+    pub fn memory_cards_mut(&mut self) -> [&mut Peripheral; 2] {
         [&mut self.memcard1, &mut self.memcard2]
     }
 
