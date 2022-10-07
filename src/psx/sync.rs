@@ -1,4 +1,4 @@
-use super::{dma, gpu, pad_memcard, spu, timers, CycleCount, Psx};
+use super::{dma, gpu, mdec, pad_memcard, spu, timers, CycleCount, Psx};
 
 /// Tokens used to keep track of the progress of each module individually
 #[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
@@ -8,6 +8,7 @@ pub enum SyncToken {
     Spu,
     Dma,
     PadMemCard,
+    MDec,
 
     NumTokens,
 }
@@ -122,6 +123,10 @@ pub fn handle_events(psx: &mut Psx) {
 
         if psx.sync.first_event >= psx.sync.next_event[SyncToken::PadMemCard as usize] {
             pad_memcard::run(psx);
+        }
+
+        if psx.sync.first_event >= psx.sync.next_event[SyncToken::MDec as usize] {
+            mdec::run(psx);
         }
 
         psx.cycle_counter += event_delta;

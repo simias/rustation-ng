@@ -1,8 +1,12 @@
 mod fifo;
 
-use super::{AccessWidth, Addressable, CycleCount, Psx};
+use super::{sync, AccessWidth, Addressable, CycleCount, Psx};
+use crate::bitwise::Bitwise;
+use fifo::Fifo;
 use std::cmp::min;
 use std::ops::{Index, IndexMut};
+
+const MDECSYNC: sync::SyncToken = sync::SyncToken::MDec;
 
 /// Motion Decoder (sometimes called macroblock or movie decoder).
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -12,9 +16,12 @@ pub struct MDec {
     /// Last received command
     command: Command,
     /// Input FIFO
-    input_fifo: fifo::CommandFifo,
+    input_fifo: Fifo,
     /// Output FIFO
-    output_fifo: fifo::OutputFifo,
+    output_fifo: Fifo,
+    /// Output buffer containing a fully decoded block before the data is pushed to the
+    /// `output_fifo` (since the FIFO is not deep enough to hold a full block)
+    output_buffer: OutputBuffer,
     /// Remaining words expected for this command
     command_remaining: u16,
     dma_in_enabled: bool,
@@ -36,6 +43,8 @@ pub struct MDec {
     block_u: Macroblock,
     /// Buffer for the currently decoded Cr macroblock.
     block_v: Macroblock,
+    /// Rough emulation of the decoder time budget: new blocks cannot be decoded while it's <= 0
+    decoder_cycle_budget: CycleCount,
     /// DMA block line length in 32bit words
     dma_block_line_length: u8,
     /// Block line offset for DMA read
@@ -49,8 +58,9 @@ impl MDec {
         MDec {
             state: State::Idle,
             command: Command(0),
-            input_fifo: fifo::CommandFifo::new(),
-            output_fifo: fifo::OutputFifo::new(),
+            input_fifo: Fifo::new(),
+            output_fifo: Fifo::new(),
+            output_buffer: OutputBuffer::new(),
             command_remaining: 0,
             dma_in_enabled: false,
             dma_out_enabled: false,
@@ -63,6 +73,7 @@ impl MDec {
             block_y: Macroblock::new(),
             block_u: Macroblock::new(),
             block_v: Macroblock::new(),
+            decoder_cycle_budget: 0,
             dma_block_line_length: 0,
             dma_block_line: 0,
             dma_block_column: 0,
@@ -74,15 +85,35 @@ impl MDec {
     }
 
     pub fn run(&mut self, cycles: CycleCount) {
-        // XXX implement MDEC timings
-        let _ = cycles;
+        // My test setup decided to give up as I was about to do MDEC timing tests, so I just
+        // lifted the code from Mednafen instead even though it's obviously not super accurate.
+        //
+        // I gather that the difficulty comes from the fact that MDEC decoding is pipelined to some
+        // extent, so the timing to decode one lone block are not the same as decoding a bunch of
+        // blocks back-to-back.
+        self.decoder_cycle_budget += cycles;
+        if self.decoder_cycle_budget > 128 {
+            self.decoder_cycle_budget = 128;
+        }
 
-        while !self.input_fifo.is_empty() {
+        loop {
             match self.state {
                 State::Idle => {
+                    if self.input_fifo.is_empty() {
+                        return;
+                    }
+
                     let next_word = self.input_fifo.pop();
 
                     self.command = Command(next_word);
+                    self.decoder_cycle_budget -= 1;
+
+                    self.state = State::HandleCommand;
+                }
+                State::HandleCommand => {
+                    if self.decoder_cycle_budget <= 0 {
+                        return;
+                    }
 
                     match self.command.opcode() {
                         1 => {
@@ -91,6 +122,7 @@ impl MDec {
                             self.current_block = BlockType::CrMono;
                             self.block_index = 0;
                             self.command_remaining = self.command.block_len();
+                            self.output_buffer.clear();
                             self.state = State::Decoding;
 
                             self.dma_block_line_length = match self.command.output_depth() {
@@ -116,6 +148,9 @@ impl MDec {
                     }
                 }
                 State::LoadQuantTable(index) => {
+                    if self.input_fifo.is_empty() {
+                        return;
+                    }
                     let next_word = self.input_fifo.pop();
 
                     let matrix = (index >> 4) as usize;
@@ -135,6 +170,9 @@ impl MDec {
                     };
                 }
                 State::LoadIdctMatrix => {
+                    if self.input_fifo.is_empty() {
+                        return;
+                    }
                     let next_word = self.input_fifo.pop();
 
                     let index = (32 - self.command_remaining) as u8;
@@ -155,20 +193,40 @@ impl MDec {
                     }
                 }
                 State::Decoding => {
-                    if self.output_fifo_full() {
-                        // Output buffer has too much data to decode an other macroblock, retry
-                        // later
-                        break;
+                    if self.input_fifo.is_empty() {
+                        return;
                     }
 
                     let next_word = self.input_fifo.pop();
+                    self.command_remaining = self.command_remaining.wrapping_sub(1);
 
                     self.decode_rle(next_word as u16);
                     self.decode_rle((next_word >> 16) as u16);
 
-                    self.command_remaining = self.command_remaining.wrapping_sub(1);
-                    if self.command_remaining == 0 {
+                    if !self.output_buffer.is_empty() {
+                        self.state = State::OutputBlock;
+                    } else if self.command_remaining == 0 {
                         self.state = State::Idle;
+                    }
+                }
+                State::OutputBlock => {
+                    if self.decoder_cycle_budget <= 0 {
+                        return;
+                    }
+
+                    if self.output_fifo.is_full() {
+                        return;
+                    }
+
+                    self.output_fifo.push(self.output_buffer.pop_word());
+
+                    if self.output_buffer.is_empty() {
+                        self.output_buffer.clear();
+                        self.state = if self.command_remaining > 0 {
+                            State::Decoding
+                        } else {
+                            State::Idle
+                        };
                     }
                 }
             }
@@ -198,31 +256,25 @@ impl MDec {
     }
 
     pub fn status(&self) -> u32 {
-        let mut r = 0;
+        let mut r = 0u32;
 
         // Bits [15:0] contain the number of remaining parameter words minus 1, or 0xffff if no
         // parameter is expected.
-        r |= self.command_remaining.wrapping_sub(1) as u32;
+        r |= u32::from(self.command_remaining.wrapping_sub(1));
 
         // TODO [16:18] Current block
 
         // Data output format for the current command
         r |= self.command.output_format() << 23;
 
-        r |= (self.dma_can_read() as u32) << 27;
-        r |= (self.dma_can_write() as u32) << 28;
+        r.set_bit(27, self.dma_can_read());
+        r.set_bit(28, self.dma_can_write());
 
-        r |= (self.state.is_busy() as u32) << 29;
-        r |= (!self.input_fifo.is_full() as u32) << 30;
-        r |= (!self.output_fifo.is_empty() as u32) << 31;
+        r.set_bit(29, self.state.is_busy());
+        r.set_bit(30, !self.input_fifo.is_full());
+        r.set_bit(31, !self.output_fifo.is_empty());
 
         r
-    }
-
-    fn output_fifo_full(&self) -> bool {
-        // This returns true if the emulated FIFO is full. Since to make things simple and always
-        // decode one block at a time I decided to use a larger emulated FIFO (512 bytes instead of 128)
-        self.output_fifo.len() >= 128
     }
 
     pub fn dma_can_write(&self) -> bool {
@@ -235,16 +287,7 @@ impl MDec {
 
     pub fn dma_can_read(&self) -> bool {
         // XXX From Mednafen, does it really only work if the FIFO is full?
-        self.output_fifo_full() && self.dma_out_enabled
-    }
-
-    pub fn read_word(&mut self) -> u32 {
-        let b0 = self.output_fifo.pop() as u32;
-        let b1 = self.output_fifo.pop() as u32;
-        let b2 = self.output_fifo.pop() as u32;
-        let b3 = self.output_fifo.pop() as u32;
-
-        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+        self.output_fifo.is_full() && self.dma_out_enabled
     }
 
     fn decode_rle(&mut self, rle: u16) {
@@ -286,7 +329,7 @@ impl MDec {
 
             if self.block_index == 8 * 8 {
                 // Block full, moving on
-                self.next_block();
+                self.decode_block();
             }
         }
     }
@@ -314,7 +357,7 @@ impl MDec {
         self.block_index += 1;
     }
 
-    fn next_block(&mut self) {
+    fn decode_block(&mut self) {
         if self.command.is_monochrome() {
             self.idct_matrix.idct(&self.block_coeffs, &mut self.block_y);
 
@@ -338,6 +381,12 @@ impl MDec {
 
                 generate_pixels
             };
+
+            // Taken straight from mednafen. Original comment reads:
+            //
+            //   Timing in the PS1 MDEC is complex due to (apparent) pipelining, but the average
+            //   when decoding a large number of blocks is about 512.
+            self.decoder_cycle_budget -= 512;
 
             if generate_pixels {
                 // We have Y, U and V macroblocks, we can convert the value and generate RGB pixels
@@ -388,8 +437,7 @@ impl MDec {
 
                 let v = (r | (g << 5) | (b << 10)) ^ xor_mask;
 
-                self.output_fifo.push(v as u8);
-                self.output_fifo.push((v >> 8) as u8);
+                self.output_buffer.push_halfword(v);
             }
         }
     }
@@ -414,17 +462,23 @@ impl MDec {
 
                 let (r, g, b) = yuv_to_rgb(l, u, v);
 
-                self.output_fifo.push(r ^ xor_mask);
-                self.output_fifo.push(g ^ xor_mask);
-                self.output_fifo.push(b ^ xor_mask);
+                self.output_buffer.push_byte(r ^ xor_mask);
+                self.output_buffer.push_byte(g ^ xor_mask);
+                self.output_buffer.push_byte(b ^ xor_mask);
             }
         }
     }
 }
 
 pub fn run(psx: &mut Psx) {
-    // TODO: timings
-    psx.mdec.run(0);
+    let elapsed = sync::resync(psx, MDECSYNC);
+
+    psx.mdec.run(elapsed);
+
+    // Since we don't have any IRQs we don't have to actually schedule an event, so I just set one
+    // at a low frequency here just to prevent the sync counter from overflowing when we're
+    // eventually called.
+    sync::next_event(psx, MDECSYNC, 1_000_000);
 }
 
 pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
@@ -478,11 +532,11 @@ pub fn dma_can_read(psx: &mut Psx) -> bool {
 
 /// Retuns the word being loaded as well as the offset in VRAM
 pub fn dma_load(psx: &mut Psx) -> (u32, u32) {
-    run(psx);
-
     let mdec = &mut psx.mdec;
 
-    let v = mdec.read_word();
+    debug_assert!(!mdec.output_fifo.is_empty());
+
+    let v = mdec.output_fifo.pop();
 
     let line = mdec.dma_block_line as u32;
     let line_length = mdec.dma_block_line_length as u32;
@@ -505,9 +559,11 @@ pub fn dma_load(psx: &mut Psx) -> (u32, u32) {
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
 enum State {
     Idle,
+    HandleCommand,
     LoadQuantTable(u8),
     LoadIdctMatrix,
     Decoding,
+    OutputBlock,
 }
 
 impl State {
@@ -827,6 +883,64 @@ impl Index<usize> for MacroblockCoeffs {
 impl IndexMut<usize> for MacroblockCoeffs {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.coeffs[index as usize]
+    }
+}
+
+/// Structure containing a fully decoded block before it's put in the output FIFO
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OutputBuffer {
+    /// Maximum size of a decoded block is 192bytes for a 64x64 24bpp block
+    #[serde(with = "serde_big_array::BigArray")]
+    buf: [u8; 192],
+    write_idx: u8,
+    read_idx: u8,
+}
+
+impl OutputBuffer {
+    fn new() -> OutputBuffer {
+        OutputBuffer {
+            buf: [0; 192],
+            write_idx: 0,
+            read_idx: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.write_idx = 0;
+        self.read_idx = 0;
+    }
+
+    fn is_empty(&mut self) -> bool {
+        self.write_idx == self.read_idx
+    }
+
+    fn push_byte(&mut self, b: u8) {
+        self.buf[usize::from(self.write_idx)] = b;
+        self.write_idx += 1;
+    }
+
+    fn push_halfword(&mut self, v: u16) {
+        self.push_byte(v as u8);
+        self.push_byte((v >> 8) as u8);
+    }
+
+    fn pop_byte(&mut self) -> u8 {
+        debug_assert!(!self.is_empty());
+
+        let b = self.buf[usize::from(self.read_idx)];
+
+        self.read_idx += 1;
+
+        b
+    }
+
+    fn pop_word(&mut self) -> u32 {
+        let b0 = self.pop_byte() as u32;
+        let b1 = self.pop_byte() as u32;
+        let b2 = self.pop_byte() as u32;
+        let b3 = self.pop_byte() as u32;
+
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
     }
 }
 

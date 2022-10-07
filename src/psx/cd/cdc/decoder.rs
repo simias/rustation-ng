@@ -38,7 +38,6 @@ pub struct Decoder {
     /// Writing to the RAM buffer is stopped
     write_stopped: bool,
     /// Counter for the DECTOUT IRQ
-    #[serde(default)]
     dectout_state: DecTOutState,
     /// For HDR register: contains the 4 CD-ROM header bytes
     hdr: HdrBuf,
@@ -672,7 +671,7 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                             | raw_data[edc_start + 3]
                             == 0
                         {
-                            warn!("ECC @ {} is all zeroes", edc_start);
+                            cdc_debug!("ECC @ {} is all zeroes", edc_start);
                             cdc.decoder.eccsts |= 1 << 7;
                         }
                     }
@@ -1501,13 +1500,10 @@ impl OutputBuffer {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
 enum DecTOutState {
-    #[default]
     Idle,
-    Armed {
-        cycles_since_last_sync: u16,
-    },
+    Armed { cycles_since_last_sync: u16 },
 }
 
 impl DecTOutState {
