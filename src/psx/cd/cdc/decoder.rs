@@ -198,9 +198,14 @@ impl Decoder {
 
     /// Decoder status register
     fn decsts(&self) -> u8 {
-        // XXX Implement RTADPBSY when streaming ADPCM. The other two bits in the register are only
-        // set when the sector sync mark has been missed which is probably irrelevant for us.
-        0
+        let mut r = 0;
+
+        // RTADPBSY
+        r.set_bit(5, self.adpcm_busy_counter > 0);
+        // Bit 1 is "SHRTSCT (short sector)"
+        // Bit 0 is "NOSYNC"
+
+        r
     }
 
     /// Host interface status register
@@ -239,7 +244,7 @@ impl Decoder {
         let mut r = 0;
 
         r |= self.ra & 3;
-        // TODO: ADPCM busy (ADPBUSY)
+        r.set_bit(2, self.adpcm_busy_counter > 0);
         r.set_bit(3, self.host_params.is_empty());
         r.set_bit(4, !self.host_params.is_full());
         r.set_bit(5, !self.host_result.is_empty());

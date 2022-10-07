@@ -180,9 +180,6 @@ impl Dsp {
     fn build_scex_string(&mut self, region: Option<Region>) {
         // Start by setting the SCEx string to zero. That's the default level when nothing is
         // output.
-        //
-        // XXX If the disc is unlicensed (audio or otherwise) we should stop here. Or maybe just
-        // set one bit to simulate the random noise I see when no SCEx string is present?
         self.scex = 0;
 
         let mut pos = 0;
@@ -753,7 +750,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
 
                         // XXX While AGT or AGF is true the laser appears to "hover" at the same
                         // location instead of following the disc. It seems to loop over the same
-                        // ~8 sectors again and again.
+                        // ~8 sectors again and again. Maybe it just stops the sled tracking?
                     }
                     // Serial data read mode select
                     0x39 => {
