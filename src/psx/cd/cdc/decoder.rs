@@ -38,7 +38,8 @@ pub struct Decoder {
     /// Writing to the RAM buffer is stopped
     write_stopped: bool,
     /// Counter for the DECTOUT IRQ
-    dectout_sectors: u8,
+    #[serde(default)]
+    dectout_state: DecTOutState,
     /// For HDR register: contains the 4 CD-ROM header bytes
     hdr: HdrBuf,
     /// For SHDR register: contains the 4 CD-ROM XA subheader bytes
@@ -107,7 +108,7 @@ impl Decoder {
             dadrc: 0,
             cmadr: 0,
             write_stopped: false,
-            dectout_sectors: 0,
+            dectout_state: DecTOutState::Idle,
             hdr: HdrBuf::new(),
             shdr: HdrBuf::new(),
             eccsts: 0,
@@ -518,6 +519,24 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
         _ => cdc.decoder.adpcm_busy_counter -= 1,
     }
 
+    // Handle decoder timeout IRQ
+    match cdc.decoder.dectout_state {
+        DecTOutState::Idle => (),
+        DecTOutState::Armed {
+            ref mut cycles_since_last_sync,
+        } => {
+            *cycles_since_last_sync += 1;
+
+            // The timeout is set to 3 sectors
+            let timeout = (44_100 / if cdc.decoder.dblspd { 150 } else { 75 }) * 3;
+
+            if *cycles_since_last_sync >= timeout {
+                cdc.decoder.irq.trigger(Irq::DecTOut);
+                cdc.decoder.dectout_state = DecTOutState::Idle;
+            }
+        }
+    }
+
     match cdc.decoder.state {
         DecoderState::Idle => (),
         DecoderState::SectorPending {
@@ -556,7 +575,9 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                         && raw_data[1..11].iter().all(|&b| b == 0xff);
 
                     if has_sync {
-                        cdc.decoder.dectout_sectors = 0;
+                        // Not sure if that's correct or if DECTOUT can only re-trigger when the
+                        // sub-CPU writes to DECCTL
+                        cdc.decoder.dectout_state.rearm();
 
                         cdc.decoder.eccsts = 0;
 
@@ -649,18 +670,7 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
                             warn!("ECC @ {} is all zeroes", edc_start);
                             cdc.decoder.eccsts |= 1 << 7;
                         }
-                    } else {
-                        // We get the IRQ if the sync is not detected after 3 sectors
-                        if cdc.decoder.dectout_sectors >= 2 {
-                            cdc.decoder.irq.trigger(Irq::DecTOut);
-                        } else {
-                            cdc.decoder.dectout_sectors += 1;
-                        }
                     }
-                    debug!(
-                        "Sector read ECCSTS: {:x} sync: {} addr: {:x}",
-                        cdc.decoder.eccsts, has_sync, cdc.decoder.cmadr
-                    );
                 } else {
                     // Maybe?
                     cdc.decoder.eccsts = 0;
@@ -787,7 +797,13 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
         }
         0x03 => {
             decoder.decctl = DecCtl(val);
-            decoder.dectout_sectors = 0;
+
+            if matches!(
+                decoder.decctl.mode(),
+                DecoderMode::MonitorOnly | DecoderMode::WriteOnly | DecoderMode::RealTimeCorrection
+            ) {
+                decoder.dectout_state.rearm();
+            }
 
             debug!("DECCTL 0x{:02x} {:?}", val, decoder.decctl.mode());
         }
@@ -1477,6 +1493,23 @@ impl OutputBuffer {
             self.start_delay -= 1;
             [0, 0]
         }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, Default)]
+enum DecTOutState {
+    #[default]
+    Idle,
+    Armed {
+        cycles_since_last_sync: u16,
+    },
+}
+
+impl DecTOutState {
+    fn rearm(&mut self) {
+        *self = DecTOutState::Armed {
+            cycles_since_last_sync: 0,
+        };
     }
 }
 
