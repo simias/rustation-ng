@@ -1,3 +1,5 @@
+#[macro_use]
+mod debug;
 mod decoder;
 mod dsp;
 mod resampler;

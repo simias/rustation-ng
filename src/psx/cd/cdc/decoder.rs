@@ -186,7 +186,7 @@ impl Decoder {
 
         let name = CMD_NAME.get(usize::from(cmd)).unwrap_or(&"Unknown");
 
-        debug!("Host command 0x{:02x} {} {:?}", cmd, name, self.host_params);
+        cdc_debug!("Host command 0x{:02x} {} {:?}", cmd, name, self.host_params);
 
         self.irq.trigger(Irq::HstCmnd);
     }
@@ -223,7 +223,7 @@ impl Decoder {
         // CLRBUSY
         if v.bit(6) {
             if self.command_busy {
-                debug!("Host command done, result: {:?}", self.host_result);
+                cdc_debug!("Host command done, result: {:?}", self.host_result);
             }
             self.command_busy = false;
         }
@@ -548,7 +548,7 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
             } else {
                 let mode = cdc.decoder.decctl.mode();
 
-                debug!("Sector read {} {:?}", sector.q().amsf(), mode);
+                cdc_debug!("Sector read {} {:?}", sector.q().amsf(), mode);
 
                 // Sector read completed, trigger DECINT if necessary
                 if mode.decint() {
@@ -781,19 +781,19 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
     // trace!("DECODER write: 0x{:02x} = 0x{:02x}", addr, val);
 
     match addr {
-        0x00 => debug!("DRVIF 0x{:02x}", val),
+        0x00 => cdc_debug!("DRVIF 0x{:02x}", val),
         // CONFIG1
         0x01 => {
             // The PlayStation normally uses 32Kx8b RAM config
             assert_eq!((val >> 2) & 7, 0, "Unexpected RAM config");
-            debug!("CONFIG_1 0x{:02x}", val);
+            cdc_debug!("CONFIG_1 0x{:02x}", val);
         }
         // CONFIG2
         0x02 => {
             if val.bit(3) {
                 unimplemented!("CONFIG2 SMBF2");
             }
-            debug!("CONFIG_2 0x{:02x}", val);
+            cdc_debug!("CONFIG_2 0x{:02x}", val);
         }
         0x03 => {
             decoder.decctl = DecCtl(val);
@@ -805,31 +805,31 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
                 decoder.dectout_state.rearm();
             }
 
-            debug!("DECCTL 0x{:02x} {:?}", val, decoder.decctl.mode());
+            cdc_debug!("DECCTL 0x{:02x} {:?}", val, decoder.decctl.mode());
         }
         0x04 => {
-            debug!("DLADR-L 0x{:02x}", val);
+            cdc_debug!("DLADR-L 0x{:02x}", val);
             decoder.dladr &= 0xff00;
             decoder.dladr |= u16::from(val);
             // XXX guess
             decoder.write_stopped = false;
         }
         0x05 => {
-            debug!("DLADR-M 0x{:02x}", val);
+            cdc_debug!("DLADR-M 0x{:02x}", val);
             decoder.dladr &= 0xff;
             decoder.dladr |= u16::from(val) << 8;
             // XXX guess
             decoder.write_stopped = false;
         }
         0x06 => {
-            debug!("DLADR-H 0x{:02x}", val);
+            cdc_debug!("DLADR-H 0x{:02x}", val);
             // We have a 32K RAM, DLADR-H should always be zero
             assert_eq!(val, 0, "Unexpected DLADR-H");
             // XXX guess
             decoder.write_stopped = false;
         }
         0x07 => {
-            debug!("CHPCTL 0x{:02x}", val);
+            cdc_debug!("CHPCTL 0x{:02x}", val);
             decoder.dblspd = val.bit(1);
             decoder.cd_da = val.bit(4);
             decoder.cd_da_mute = val.bit(5);
@@ -837,7 +837,7 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
         }
         0x09 => {
             if decoder.irq.mask != val {
-                debug!("INTMSK 0x{:02x}", val);
+                cdc_debug!("INTMSK 0x{:02x}", val);
                 decoder.irq.mask = val;
             }
         }
@@ -851,12 +851,12 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.irq.status &= !val;
         }
         0x0c => {
-            debug!("HXFR-L 0x{:02x}", val);
+            cdc_debug!("HXFR-L 0x{:02x}", val);
             decoder.hxfr &= 0xff00;
             decoder.hxfr |= u16::from(val);
         }
         0x0d => {
-            debug!("HXFR-H 0x{:02x}", val);
+            cdc_debug!("HXFR-H 0x{:02x}", val);
             decoder.hxfr &= 0xff;
             decoder.hxfr |= u16::from(val & 0xf) << 8;
 
@@ -868,31 +868,31 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.dishxfrc = val.bit(7);
         }
         0x0e => {
-            debug!("HADR-L 0x{:02x}", val);
+            cdc_debug!("HADR-L 0x{:02x}", val);
             decoder.hadr &= 0xff00;
             decoder.hadr |= u16::from(val);
         }
         0x0f => {
-            debug!("HADR-M 0x{:02x}", val);
+            cdc_debug!("HADR-M 0x{:02x}", val);
             decoder.hadr &= 0xff;
             decoder.hadr |= u16::from(val) << 8;
         }
         0x10 => {
-            debug!("DADRC-L 0x{:02x}", val);
+            cdc_debug!("DADRC-L 0x{:02x}", val);
             decoder.dadrc &= 0xff00;
             decoder.dadrc |= u16::from(val);
             // XXX guess
             decoder.write_stopped = false;
         }
         0x11 => {
-            debug!("DADRC-M 0x{:02x}", val);
+            cdc_debug!("DADRC-M 0x{:02x}", val);
             decoder.dadrc &= 0xff;
             decoder.dadrc |= u16::from(val) << 8;
             // XXX guess
             decoder.write_stopped = false;
         }
         0x12 => {
-            debug!("DADRC-H 0x{:02x}", val);
+            cdc_debug!("DADRC-H 0x{:02x}", val);
             // We have a 32K RAM, DADRC-H should always be zero
             assert_eq!(val, 0, "Unexpected DLADR-H");
             // XXX guess
@@ -904,7 +904,7 @@ pub fn sub_cpu_write(cdc: &mut Cdc, addr: u8, val: u8) {
             decoder.hintsts |= val & 7;
 
             if val & 7 != 0 {
-                debug!(
+                cdc_debug!(
                     "Triggering host IRQ {}, result: {:?}",
                     val & 7,
                     decoder.host_result
@@ -960,7 +960,7 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
                     } else {
                         decoder.hxfrc = decoder.hxfr;
                         let madr = usize::from(decoder.hadr & 0x7c00);
-                        debug!(
+                        cdc_debug!(
                             "Host DMA read started {} 0x{:04x} {:02x}:{:02x}:{:02x}",
                             decoder.hxfrc,
                             decoder.hadr,
@@ -1005,7 +1005,7 @@ pub fn host_write(cdc: &mut Cdc, addr: u8, v: u8) {
         (2, 3) => decoder.atv_pending[3] = v,
         // ADPCTL
         (3, 3) => {
-            debug!("ADPCTL");
+            cdc_debug!("ADPCTL");
             if v.bit(5) {
                 decoder.atv = decoder.atv_pending;
             }
@@ -1156,7 +1156,7 @@ impl IrqController {
     }
 
     fn trigger(&mut self, irq: Irq) {
-        debug!("Decoder trigger {:?}", irq);
+        cdc_debug!("Decoder trigger {:?}", irq);
         self.status |= 1u8 << (irq as u8);
     }
 }

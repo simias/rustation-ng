@@ -14,6 +14,8 @@ crate-type = ["dylib"]
 [features]
 # Enable debugger support
 debugger = []
+# Enable many CDC debug messages
+cdc_verbose = []
 
 [profile.dev]
 debug = true

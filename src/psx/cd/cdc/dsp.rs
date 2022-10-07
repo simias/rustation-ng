@@ -456,7 +456,7 @@ fn read_sector(cdc: &mut Cdc) {
     cdc.uc.set_dsp_scor(true);
 
     // Fetch the new sector
-    debug!("Reading sector {}", cdc.dsp.position);
+    cdc_debug!("Reading sector {}", cdc.dsp.position);
     let disc = cdc
         .disc
         .as_mut()
@@ -572,7 +572,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
 
     let op = cmd >> 20;
 
-    debug!("DSP latch 0x{:06x}", cmd);
+    cdc_debug!("DSP latch 0x{:06x}", cmd);
 
     if op <= 3 {
         // Servo command
@@ -597,15 +597,15 @@ pub fn serial_latch(cdc: &mut Cdc) {
                 cdc.dsp.focus_control = fc;
 
                 if fc & 0b1100 == 0b1000 {
-                    debug!("Focus servo ON (focus gain normal)");
+                    cdc_debug!("Focus servo ON (focus gain normal)");
                 } else if fc & 0b1100 == 0b1100 {
-                    debug!("Focus servo ON (focus gain down)");
+                    cdc_debug!("Focus servo ON (focus gain down)");
                 } else if fc & 0b1010 == 0b0000 {
-                    debug!("Focus servo OFF, 0V out");
+                    cdc_debug!("Focus servo OFF, 0V out");
                 } else if fc & 0b1011 == 0b0010 {
-                    debug!("Focus search voltage down");
+                    cdc_debug!("Focus search voltage down");
                 } else if fc & 0b1011 == 0b0011 {
-                    debug!("Focus search voltage up");
+                    cdc_debug!("Focus search voltage up");
                 }
             }
             // Tracking control
@@ -615,7 +615,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
                 if cdc.dsp.tracking_control != tc {
                     cdc.dsp.tracking_control = tc;
 
-                    debug!(
+                    cdc_debug!(
                         "Tracking control: anti-shock {}, brake {}, \
                        tracking gain {} filter select {}",
                         if tc & 0xc == 8 { "on" } else { "off" },
@@ -631,18 +631,18 @@ pub fn serial_latch(cdc: &mut Cdc) {
                 cdc.dsp.tracking_mode = tm;
 
                 match (tm >> 2) & 3 {
-                    0 => debug!("Tracking servo OFF"),
-                    1 => debug!("Tracking servo ON"),
+                    0 => cdc_debug!("Tracking servo OFF"),
+                    1 => cdc_debug!("Tracking servo ON"),
                     2 => unimplemented!("Forward track jump"),
                     3 => unimplemented!("Reverse track jump"),
                     _ => unreachable!(),
                 }
 
                 match tm & 3 {
-                    0 => debug!("Sled servo OFF"),
-                    1 => debug!("Sled servo ON"),
-                    2 => debug!("Forward sled move"),
-                    3 => debug!("Reverse sled move"),
+                    0 => cdc_debug!("Sled servo OFF"),
+                    1 => cdc_debug!("Sled servo ON"),
+                    2 => cdc_debug!("Forward sled move"),
+                    3 => cdc_debug!("Reverse sled move"),
                     _ => unreachable!(),
                 }
             }
@@ -654,7 +654,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
 
                         if cdc.dsp.sled_kick_level != kl {
                             cdc.dsp.sled_kick_level = kl;
-                            debug!("Sled kick level ±{}", kl);
+                            cdc_debug!("Sled kick level ±{}", kl);
                         }
                     }
                     // Coefficient RAM + focus bias and TRVSC data
@@ -663,9 +663,13 @@ pub fn serial_latch(cdc: &mut Cdc) {
 
                         match addr2 {
                             0b0000_00..=0b0100_11 => {
-                                debug!("Write K{:02X} = 0x{:02x}", (cmd >> 8) & 0xff, cmd & 0xff)
+                                cdc_debug!(
+                                    "Write K{:02X} = 0x{:02x}",
+                                    (cmd >> 8) & 0xff,
+                                    cmd & 0xff
+                                )
                             }
-                            0b1111_00 => debug!("TRVSC data: 0x{:03x}", cmd & 0x3ff),
+                            0b1111_00 => cdc_debug!("TRVSC data: 0x{:03x}", cmd & 0x3ff),
                             // Focus BIAS data
                             0b1111_01 => {
                                 // Sign extend and mask bit 0 which is not used according to the
@@ -679,7 +683,7 @@ pub fn serial_latch(cdc: &mut Cdc) {
                                 // defocus triggers below are going to be all messed up if we treat
                                 // it as unsigned.
                                 cdc.dsp.focus_bias = focus_bias;
-                                debug!("Focus bias data: {}", focus_bias);
+                                cdc_debug!("Focus bias data: {}", focus_bias);
 
                                 // The actual defocus level changes from drive to drive, one of
                                 // them seems to lose it at about ±144, the one that I use for
@@ -699,10 +703,10 @@ pub fn serial_latch(cdc: &mut Cdc) {
                         }
                     }
                     // FZSL/SLED MOVE/Voltage/AUTO GAIN
-                    0x37 => debug!("FZSL/SLED MOVE/Voltage/AUTO GAIN: 0x{:04x}", cmd & 0xffff),
+                    0x37 => cdc_debug!("FZSL/SLED MOVE/Voltage/AUTO GAIN: 0x{:04x}", cmd & 0xffff),
                     // Level/AUTO GAIN/DFSW/(Initialize)
                     0x38 => {
-                        debug!("Level/AUTO GAIN/DFSW/(Initialize): 0x{:04x}", cmd & 0xffff);
+                        cdc_debug!("Level/AUTO GAIN/DFSW/(Initialize): 0x{:04x}", cmd & 0xffff);
 
                         // Tracking zero level measurement
                         let is_tclm = cmd & (1 << 4) != 0;
@@ -766,19 +770,19 @@ pub fn serial_latch(cdc: &mut Cdc) {
                     0x3a => {
                         // Only one bit in this register
                         if cmd & (1 << 14) != 0 {
-                            debug!("FBON");
+                            cdc_debug!("FBON");
                         } else {
-                            debug!("FBOFF");
+                            cdc_debug!("FBOFF");
                         }
                     }
                     // Operation for MIRR/DFCT/FOK
                     // There's a bunch of different values in this register configuring low level
                     // things we (probably) don't care about
-                    0x3b => debug!("Operation for MIRR/DFCT/FOK: 0x{:03x}", (cmd >> 4) & 0xfff),
-                    0x3c => debug!("TZC for COUT SLCT HPTZC"),
-                    0x3d => debug!("TZC for COUT SLCT DTZC"),
-                    0x3e => debug!("Filter: 0x{:04x}", cmd & 0xffff),
-                    0x3f => debug!("Others: 0x{:04x}", cmd & 0xffff),
+                    0x3b => cdc_debug!("Operation for MIRR/DFCT/FOK: 0x{:03x}", (cmd >> 4) & 0xfff),
+                    0x3c => cdc_debug!("TZC for COUT SLCT HPTZC"),
+                    0x3d => cdc_debug!("TZC for COUT SLCT DTZC"),
+                    0x3e => cdc_debug!("Filter: 0x{:04x}", cmd & 0xffff),
+                    0x3f => cdc_debug!("Others: 0x{:04x}", cmd & 0xffff),
                     sel => unimplemented!("SELECT 0x{:02x}", sel),
                 }
             }
@@ -791,19 +795,19 @@ pub fn serial_latch(cdc: &mut Cdc) {
             0x5 => {
                 let tr = (cmd >> 16) & 0xf;
 
-                debug!("Blind/Overflow/Break: 0x{:x}", tr);
+                cdc_debug!("Blind/Overflow/Break: 0x{:x}", tr);
             }
             0x6 => {
                 let cmd = (cmd >> 12) as u8;
                 let kick_d = (cmd >> 4) & 0xf;
                 let kick_f = cmd & 0xf;
 
-                debug!("Kick D 0x{:x}, Kick F 0x{:x}", kick_d, kick_f);
+                cdc_debug!("Kick D 0x{:x}, Kick F 0x{:x}", kick_d, kick_f);
             }
             0x7 => {
                 cdc.dsp.track_jump_count = (cmd >> 4) as u16;
 
-                debug!("Track jump count: {}", cdc.dsp.track_jump_count);
+                cdc_debug!("Track jump count: {}", cdc.dsp.track_jump_count);
             }
             // MODE setting
             0x8 => {
@@ -824,49 +828,55 @@ pub fn serial_latch(cdc: &mut Cdc) {
                     // refreshing soct_sr if needed, nothing to do here.
                     cdc.dsp.soct_en = soct;
 
-                    debug!(
+                    cdc_debug!(
                         "MODE setting: CDROM {}, DOUT Mute {}, D.out Mute-F {}, WSEL {}, \
                          VCO SEL {}, ASHS {}, SOCT {}",
-                        cdrom, dout_mute, dout_mute_f, wsel, vco_sel, ashs, soct
+                        cdrom,
+                        dout_mute,
+                        dout_mute_f,
+                        wsel,
+                        vco_sel,
+                        ashs,
+                        soct
                     );
                 }
             }
             // Function specification
             0x9 => cdc.dsp.set_function_specification((cmd >> 12) as u8),
             // Audio control
-            0xa => debug!("DSP audio ctrl: 0x{:02x}", (cmd >> 12) & 0xff),
+            0xa => cdc_debug!("DSP audio ctrl: 0x{:02x}", (cmd >> 12) & 0xff),
             // Traverse monitor counter setting
             0xb => {
                 cdc.dsp.traverse_monitor_counter = (cmd >> 4) as u16;
                 cdc.dsp.cout = true;
                 cdc.dsp.cout_tracks = 0.;
-                debug!(
+                cdc_debug!(
                     "DSP traverse monitor counter: {}",
                     cdc.dsp.traverse_monitor_counter
                 );
             }
             // Spindle servo coefficient setting
-            0xc => debug!("Spindle servo coef 0x{:02x}", (cmd >> 12) & 0xff),
+            0xc => cdc_debug!("Spindle servo coef 0x{:02x}", (cmd >> 12) & 0xff),
             // CLV CTRL
-            0xd => debug!("DSP CLV ctrl: 0x{:x}", (cmd >> 16) & 0xf),
+            0xd => cdc_debug!("DSP CLV ctrl: 0x{:x}", (cmd >> 16) & 0xf),
             // CLV mode
             0xe => {
                 let clv_mode = (cmd >> 16) & 0xf;
                 let mut clvp_engaged = false;
 
                 match clv_mode {
-                    0b0000 => debug!("CLV stop"),
+                    0b0000 => cdc_debug!("CLV stop"),
                     // Kick: sends the disc rotating very fast. It's not "just" a short kick.
-                    0b1000 => debug!("CLV kick"),
-                    0b1010 => debug!("CLV brake"),
-                    0b1110 => debug!("CLVS"),
-                    0b1100 => debug!("CLVH"),
+                    0b1000 => cdc_debug!("CLV kick"),
+                    0b1010 => cdc_debug!("CLV brake"),
+                    0b1110 => cdc_debug!("CLVS"),
+                    0b1100 => cdc_debug!("CLVH"),
                     0b1111 => {
-                        debug!("CLVP");
+                        cdc_debug!("CLVP");
                         clvp_engaged = true;
                     }
                     0b0110 => {
-                        debug!("CLVA");
+                        cdc_debug!("CLVA");
                         // CLVA automatically switches between CLVS (rough mode) and CLVP (PLL
                         // mode), for the sake of simplicity for now we're going to pretend that in
                         // this mode we're always properly lock to the PLL
@@ -1012,7 +1022,7 @@ fn auto_focus_finish(cdc: &mut Cdc) {
     cdc.dsp.focus_ok = fok;
 
     cdc.dsp.state = if fok {
-        info!("Focus OK");
+        cdc_debug!("Focus OK");
         State::BusyWait(us_to_audio_cycles(6_500))
     } else {
         // Focusing failed
@@ -1021,7 +1031,7 @@ fn auto_focus_finish(cdc: &mut Cdc) {
 }
 
 fn jump_finish(cdc: &mut Cdc) {
-    info!("Jump complete {}", cdc.dsp.position);
+    cdc_debug!("Jump complete {}", cdc.dsp.position);
     cdc.dsp.state = State::Idle;
     update_sens(cdc)
 }
@@ -1128,9 +1138,12 @@ fn track_jump_2n(cdc: &mut Cdc, dir: SledDirection) {
         .offset_turns(rel_track_count)
         .expect("bad jump");
 
-    info!(
+    cdc_debug!(
         "track jump {:?} {} ({} -> {})",
-        dir, track_count, cdc.dsp.position, new_pos
+        dir,
+        track_count,
+        cdc.dsp.position,
+        new_pos
     );
 
     // XXX I haven't actually checked if the timings differ when seeking backwards, I only timed
@@ -1169,7 +1182,7 @@ fn track_jump_1(cdc: &mut Cdc, dir: SledDirection) {
     // 650us. There don't appear to be timing differences between forward and backward jumps
     let xbusy_delay = us_to_audio_cycles(550);
 
-    info!("track jump {} ({} -> {})", turns, cdc.dsp.position, new_pos);
+    cdc_debug!("track jump {} ({} -> {})", turns, cdc.dsp.position, new_pos);
 
     cdc.dsp.state = State::Jump(xbusy_delay);
 
