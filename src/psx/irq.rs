@@ -133,11 +133,11 @@ pub fn active(psx: &Psx) -> bool {
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum IrqState {
     Idle,
-    Triggered,
+    Active,
 }
 
 impl IrqState {
-    pub fn is_triggered(self) -> bool {
-        self == IrqState::Triggered
+    pub fn is_active(self) -> bool {
+        self == IrqState::Active
     }
 }

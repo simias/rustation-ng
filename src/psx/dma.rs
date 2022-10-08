@@ -148,9 +148,8 @@ pub fn store<T: Addressable>(psx: &mut Psx, offset: u32, val: T) {
                 refresh_cpu_halt(psx);
             }
             4 => {
-                if psx.dma.irq_config.set(val).is_triggered() {
-                    irq::trigger(psx, irq::Interrupt::Dma);
-                }
+                let irq = psx.dma.irq_config.set(val);
+                irq::set_level(psx, irq::Interrupt::Dma, irq.is_active());
             }
             _ => unimplemented!("DMA register write to {:x}", reg),
         },
@@ -368,8 +367,9 @@ fn run_channel(psx: &mut Psx, port: Port, cycles: CycleCount) {
                 }
             };
 
-            if end_of_dma && psx.dma.end_of_dma(port).is_triggered() {
-                irq::trigger(psx, irq::Interrupt::Dma);
+            if end_of_dma {
+                let irq = psx.dma.end_of_dma(port);
+                irq::set_level(psx, irq::Interrupt::Dma, irq.is_active());
             }
         }
     }
@@ -675,8 +675,6 @@ impl IrqConfig {
     /// Refresh the state of the master IRQ flag and returns IrqState::Triggered if an interrupt
     /// should be asserted
     fn refresh_irq(&mut self) -> IrqState {
-        let cur_master = self.0 & (1 << 31) != 0;
-
         let flags = self.0 & 0x7f00_0000;
 
         let channel_irq_active = self.channel_irq_enable() && flags != 0;
@@ -684,16 +682,9 @@ impl IrqConfig {
         let new_master = channel_irq_active || self.master_irq_forced();
 
         if new_master {
-            if !cur_master {
-                // IRQ has been triggered
-                self.0 |= 1 << 31;
-                IrqState::Triggered
-            } else {
-                // IRQ was already active, nothing to do
-                IrqState::Idle
-            }
+            self.0 |= 1 << 31;
+            IrqState::Active
         } else {
-            // Master is disabled
             self.0 &= !(1 << 31);
             IrqState::Idle
         }
