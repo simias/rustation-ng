@@ -13,7 +13,6 @@ use shaman::{digest::Digest, sha2::Sha256};
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct CdInterface {
     pub cdc: cdc::Cdc,
-    irq_active: bool,
     /// Counter to prevent overclocking the CDC when the MDEC is active (since it's probably
     /// streaming data from the CD)
     mdec_busy_cooldown: u16,
@@ -59,11 +58,8 @@ impl CdInterface {
 
         let cdc = cdc::Cdc::new(&cdc_rom, disc);
 
-        let irq_active = cdc.irq_active();
-
         Ok(CdInterface {
             cdc,
-            irq_active,
             mdec_busy_cooldown: 0,
         })
     }
@@ -117,13 +113,7 @@ pub fn load<T: Addressable>(psx: &mut Psx, off: u32) -> T {
 }
 
 fn refresh_irq(psx: &mut Psx) {
-    let irq = psx.cd.cdc.irq_active();
-
-    if irq && !psx.cd.irq_active {
-        irq::trigger(psx, irq::Interrupt::CdRom);
-    }
-
-    psx.cd.irq_active = irq;
+    irq::set_level(psx, irq::Interrupt::CdRom, psx.cd.cdc.irq_active());
 }
 
 /// This is the SHA256 for the firmware we tested with, `scph-5502_SC430939.bin`.

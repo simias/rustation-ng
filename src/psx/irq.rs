@@ -25,6 +25,8 @@ pub enum Interrupt {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
 pub struct InterruptState {
+    /// Interrupt lane levels
+    level: u16,
     /// Interrupt status
     status: u16,
     /// Interrupt mask
@@ -33,7 +35,11 @@ pub struct InterruptState {
 
 impl InterruptState {
     pub fn new() -> InterruptState {
-        InterruptState { status: 0, mask: 0 }
+        InterruptState {
+            level: 0,
+            status: 0,
+            mask: 0,
+        }
     }
 }
 
@@ -45,8 +51,41 @@ pub fn mask(psx: &Psx) -> u16 {
     psx.irq.mask
 }
 
+pub fn set_high(psx: &mut Psx, which: Interrupt) {
+    let m = 1 << which as usize;
+
+    if psx.irq.level & m != 0 {
+        // No change
+        return;
+    }
+
+    // Rising edge
+    psx.irq.level |= m;
+    psx.irq.status |= m;
+
+    cpu::irq_changed(psx);
+}
+
+pub fn set_low(psx: &mut Psx, which: Interrupt) {
+    let m = 1 << which as usize;
+
+    psx.irq.level &= !m;
+}
+
+pub fn set_level(psx: &mut Psx, which: Interrupt, high: bool) {
+    if high {
+        set_high(psx, which);
+    } else {
+        set_low(psx, which);
+    }
+}
+
+/// Pulse the IRQ lane
 pub fn trigger(psx: &mut Psx, which: Interrupt) {
-    psx.irq.status |= 1 << which as usize;
+    let m = 1 << which as usize;
+
+    psx.irq.status |= m;
+    psx.irq.level &= !m;
 
     cpu::irq_changed(psx);
 }
