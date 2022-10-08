@@ -16,13 +16,17 @@ impl AudioResampler {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.buffer = [0; 32];
+    }
+
     pub fn resample(&self, phase: u8) -> i16 {
         let coefs = &FIR_COEFFS[phase as usize];
 
         let mut r = 0;
 
         for i in 0..25 {
-            let buffer_index = (self.index as usize + i) & 0x1f;
+            let buffer_index = (usize::from(self.index) + i) & 0x1f;
 
             let s = i32::from(self.buffer[buffer_index]);
             let c = i32::from(coefs[i]);

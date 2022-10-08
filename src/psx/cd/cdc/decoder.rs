@@ -776,6 +776,19 @@ pub fn run_audio_cycle(cdc: &mut Cdc) {
 }
 
 pub fn get_audio_sample(cdc: &mut Cdc) -> [i16; 2] {
+    if cdc.decoder.output_buffer.len() == 1 {
+        // We're about to pop the last sample, that probably means that we're no longer streaming
+        // audio. Reset the resamplers to make sure that we restart from a clean state.
+        //
+        // I expect that on the real hardware this isn't necessary because the resamplers run
+        // non-stop (resampling silence when nothing is playing), but I'm not sure. The firmware
+        // doesn't seem to do anything special when starting a new play command.
+        cdc.decoder.resamplers[0].clear();
+        cdc.decoder.resamplers[1].clear();
+        cdc.decoder.adpcm_audio_phase = 0;
+        cdc.decoder.adpcm_last = [[0; 2]; 2];
+    }
+
     cdc.decoder.output_buffer.pop_sample_44100()
 }
 
@@ -1453,6 +1466,11 @@ impl OutputBuffer {
 
     fn is_full(&self) -> bool {
         self.write_idx == self.read_idx ^ (OUTPUT_BUFFER_SIZE as u16)
+    }
+
+    pub fn len(&self) -> u16 {
+        let sz = OUTPUT_BUFFER_SIZE as u16;
+        (self.write_idx.wrapping_sub(self.read_idx)) & (sz - 1)
     }
 
     fn push_sample_44100(&mut self, sample: [i16; 2]) {
