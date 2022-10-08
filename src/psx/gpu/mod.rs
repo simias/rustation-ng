@@ -547,8 +547,7 @@ fn handle_eol(psx: &mut Psx) {
         psx.gpu.display_active = false;
         psx.gpu.cur_line_vram_offset = 0;
 
-        irq::trigger(psx, irq::Interrupt::VBlank);
-
+        irq::set_high(psx, irq::Interrupt::VBlank);
         timers::set_in_vsync(psx, true);
 
         if psx.gpu.display_mode.is_true_interlaced() {
@@ -581,6 +580,7 @@ fn handle_eol(psx: &mut Psx) {
     if cur_line == psx.gpu.display_line_start && !psx.gpu.display_active {
         // We're entering the active display area
         psx.gpu.display_active = true;
+        irq::set_low(psx, irq::Interrupt::VBlank);
         timers::set_in_vsync(psx, false);
     }
 
