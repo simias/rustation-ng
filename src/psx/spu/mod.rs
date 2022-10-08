@@ -569,6 +569,7 @@ fn store16(psx: &mut Psx, off: u32, val: u16) {
                 } else {
                     // IRQ is acknowledged
                     psx.spu.irq = false;
+                    irq::set_low(psx, irq::Interrupt::Spu);
                 }
             }
             regmap::TRANSFER_CONTROL => {
@@ -714,7 +715,7 @@ fn ram_read(psx: &mut Psx, index: RamIndex) -> u16 {
 fn check_for_irq(psx: &mut Psx, index: RamIndex) {
     if psx.spu.irq_enabled() && index == psx.spu.irq_addr {
         psx.spu.irq = true;
-        irq::trigger(psx, irq::Interrupt::Spu);
+        irq::set_high(psx, irq::Interrupt::Spu);
     }
 }
 
