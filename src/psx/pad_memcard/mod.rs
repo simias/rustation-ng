@@ -255,9 +255,7 @@ impl PadMemCard {
     }
 
     /// Returns `true` if an interrupt should be triggered
-    fn set_control(&mut self, ctrl: u16) -> bool {
-        let mut irq = false;
-
+    fn set_control(&mut self, ctrl: u16) {
         let prev_select = self.select;
         let prev_target = self.target;
 
@@ -275,7 +273,6 @@ impl PadMemCard {
         } else {
             if ctrl & 0x10 != 0 {
                 // Interrupt acknowledge
-
                 self.interrupt = false;
             }
 
@@ -292,9 +289,12 @@ impl PadMemCard {
                 panic!("Gamepad rx_en not implemented");
             }
 
-            if self.maybe_trigger_irq() {
-                // Interrupt should trigger here but that really shouldn't happen I think.
-                panic!("dsr_it enabled while DSR signal is active");
+            if !self.interrupt {
+                self.refresh_irq_level();
+                if self.interrupt {
+                    // Interrupt should trigger here but that really shouldn't happen I think.
+                    panic!("dsr_it enabled while DSR signal is active");
+                }
             }
 
             if ctrl & 0xf00 != 0 {
@@ -330,26 +330,21 @@ impl PadMemCard {
             self.memcard2_dsr = DsrState::Idle;
         }
 
-        if self.maybe_trigger_irq() {
+        let prev_interrupt = self.interrupt;
+        self.refresh_irq_level();
+
+        if !prev_interrupt && self.interrupt {
             // The controller's "dsr_it" interrupt is not edge triggered: as long as self.dsr &&
             // self.dsr_it is true it will keep being triggered. If the software attempts to
             // acknowledge the interrupt in this state it will re-trigger immediately which will be
             // seen by the edge-triggered top level interrupt controller. So I guess this shouldn't
             // happen?
             warn!("Gamepad interrupt acknowledge while DSR is active");
-            irq = true;
         }
-
-        irq
     }
 
-    fn maybe_trigger_irq(&mut self) -> bool {
-        if !self.interrupt && self.dsr_active() && self.dsr_it {
-            self.interrupt = true;
-            true
-        } else {
-            false
-        }
+    fn refresh_irq_level(&mut self) {
+        self.interrupt |= self.dsr_active() && self.dsr_it;
     }
 }
 
@@ -415,9 +410,8 @@ fn run_dsr(psx: &mut Psx, cycles: CycleCount) {
     psx.pad_memcard.memcard2_dsr.run(cycles);
 
     // See if a new DSR pulse occurred to trigger the IRQ
-    if psx.pad_memcard.maybe_trigger_irq() {
-        irq::trigger(psx, Interrupt::PadMemCard);
-    }
+    psx.pad_memcard.refresh_irq_level();
+    irq::set_level(psx, Interrupt::PadMemCard, psx.pad_memcard.interrupt);
 }
 
 fn predict_next_sync(psx: &mut Psx) {
@@ -477,10 +471,8 @@ pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
                 // Byte access behaves like a halfword
                 unimplemented!("Unhandled byte gamepad control access");
             }
-            let irq = psx.pad_memcard.set_control(v);
-            if irq {
-                irq::trigger(psx, Interrupt::PadMemCard);
-            }
+            psx.pad_memcard.set_control(v);
+            irq::set_level(psx, Interrupt::PadMemCard, psx.pad_memcard.interrupt);
         }
         14 => psx.pad_memcard.baud_div = v,
         _ => unimplemented!("Write to gamepad register {} {:04x}", off, v),
