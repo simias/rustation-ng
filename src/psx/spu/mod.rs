@@ -414,6 +414,8 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
             // Test prev address
             let prev = psx.spu[voice].cur_index.wrapping_sub(1) & 0x3_ffff;
             check_for_irq(psx, prev);
+            // This is taken from mednafen, not shure why it's necessary
+            check_for_irq(psx, prev & 0x3_fff8);
         }
     } else {
         // True if we're starting a new ADPCM block
@@ -436,6 +438,8 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
         if psx.spu.irq_enabled() {
             // Test current address
             check_for_irq(psx, psx.spu[voice].cur_index);
+            // This is taken from mednafen, not shure why it's necessary
+            check_for_irq(psx, psx.spu[voice].cur_index & 0x3_fff8);
         }
 
         if new_block {
