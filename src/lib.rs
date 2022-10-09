@@ -504,6 +504,10 @@ impl libretro::Context for Context {
         self.psx
             .cd
             .set_cd_loading_speed(options::CoreOptions::cd_speed() / 2);
+
+        self.psx
+            .gte
+            .set_overclock(options::CoreOptions::gte_overclock());
     }
 
     fn reset(&mut self) {
@@ -770,6 +774,8 @@ mod options {
                 => "Force transparency for all draw commands; disabled|enabled";
             wireframe: WireframeMode, parse_wireframe
                 => "Draw wireframe for triangles and quads; disabled|overlay|wireframe only";
+            gte_overclock: bool, parse_bool
+                => "GTE overclock; disabled|enabled";
             cd_speed: u8, parse_u8
                 => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
             analog_combo: AnalogCombo, parse_analog_combo

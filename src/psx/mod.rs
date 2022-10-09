@@ -36,7 +36,7 @@ pub struct Psx {
     sync: sync::Synchronizer,
     pub cpu: cpu::Cpu,
     pub cop0: cop0::Cop0,
-    gte: gte::Gte,
+    pub gte: gte::Gte,
     irq: irq::InterruptState,
     /// Executable memory: RAM, Bios etc...
     xmem: xmem::XMemory,

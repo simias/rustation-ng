@@ -47,6 +47,10 @@ pub struct Cpu {
     /// concurrently with other "normal" MIPS instructions and only block if a mf(hi|lo) is
     /// executed before they're finished
     mult_div_end: CycleCount,
+    /// Date at which the last GTE operation will be done. GTE commands can run concurrently with
+    /// main CPU instructions and will only stall is
+    #[serde(default)]
+    gte_command_end: CycleCount,
     /// Offset added to the index in the opcode jumptable when decoding instructions
     opcode_table_offset: u8,
 }
@@ -74,6 +78,7 @@ impl Cpu {
             delay_slot: false,
             debug_on_break: false,
             mult_div_end: 0,
+            gte_command_end: 0,
             opcode_table_offset: 0,
         }
     }
@@ -117,6 +122,7 @@ impl Cpu {
     /// Rebase our internal counters that are relative to the global `cycle_counter`
     pub fn rebase_counters(&mut self, cycle_counter: CycleCount) {
         self.mult_div_end -= cycle_counter;
+        self.gte_command_end -= cycle_counter;
     }
 
     /// Return the current value of register `index`
@@ -624,7 +630,7 @@ fn sync_mult_div(psx: &mut Psx) {
 
     if block_for == 1 {
         // XXX timing hack from mednafen, if we only have one cycle left we ignore it. We should
-        // really just implement promper timing from psxact
+        // really just implement proper timing from psxact
         return;
     }
 
@@ -1219,6 +1225,10 @@ fn op_cop1(psx: &mut Psx, _: Instruction) {
 
 /// Coprocessor 2 opcode (GTE)
 fn op_cop2(psx: &mut Psx, instruction: Instruction) {
+    if psx.cpu.gte_command_end > psx.cycle_counter {
+        psx.cycle_counter = psx.cpu.gte_command_end;
+    }
+
     // XXX: we should check that the GTE is enabled in cop0's status register, otherwise the cop2
     // instructions seem to freeze the CPU (or maybe raise an exception?). Furthermore it seems
     // that one has to wait at least two cycles (tested with two nops) after raising the flag in
@@ -1230,8 +1240,7 @@ fn op_cop2(psx: &mut Psx, instruction: Instruction) {
 
         psx.cpu.delayed_load();
 
-        // XXX handle GTE command duration
-        psx.gte.command(instruction.0);
+        psx.cpu.gte_command_end = psx.cycle_counter + psx.gte.command(instruction.0);
     } else {
         match cop_opcode {
             0b00000 => op_mfc2(psx, instruction),
@@ -1245,30 +1254,48 @@ fn op_cop2(psx: &mut Psx, instruction: Instruction) {
 
 /// Move From Coprocessor 2 Data register
 fn op_mfc2(psx: &mut Psx, instruction: Instruction) {
+    let block_for = psx.cpu.gte_command_end - psx.cycle_counter;
+
+    let delay = if block_for > 0 {
+        psx.cycle_counter = psx.cpu.gte_command_end;
+        block_for as u8
+    } else {
+        0
+    };
+
     let cpu_r = instruction.t();
     let cop_r = instruction.d().0;
 
     let v = psx.gte.data(cop_r);
 
-    // XXX handle delay
-    let delay = 0;
     psx.cpu.delayed_load_chain(cpu_r, v, delay, false);
 }
 
 /// Move From Coprocessor 2 Control register
 fn op_cfc2(psx: &mut Psx, instruction: Instruction) {
+    let block_for = psx.cpu.gte_command_end - psx.cycle_counter;
+
+    let delay = if block_for > 0 {
+        psx.cycle_counter = psx.cpu.gte_command_end;
+        block_for as u8
+    } else {
+        0
+    };
+
     let cpu_r = instruction.t();
     let cop_r = instruction.d().0;
 
     let v = psx.gte.control(cop_r);
 
-    // XXX handle delay
-    let delay = 0;
     psx.cpu.delayed_load_chain(cpu_r, v, delay, false);
 }
 
 /// Move To Coprocessor 2 Data register
 fn op_mtc2(psx: &mut Psx, instruction: Instruction) {
+    if psx.cpu.gte_command_end > psx.cycle_counter {
+        psx.cycle_counter = psx.cpu.gte_command_end;
+    }
+
     // Mednafen doesn't force the register sync if a load was in progress here. It doesn't make a
     // lot of sense to me, maybe it's a mistake or maybe it compensates from something else. For
     // the time being just do whatever mednafen does.
@@ -1284,6 +1311,10 @@ fn op_mtc2(psx: &mut Psx, instruction: Instruction) {
 
 /// Move To Coprocessor 2 Control register
 fn op_ctc2(psx: &mut Psx, instruction: Instruction) {
+    if psx.cpu.gte_command_end > psx.cycle_counter {
+        psx.cycle_counter = psx.cpu.gte_command_end;
+    }
+
     // Mednafen doesn't force the register sync if a load was in progress here. It doesn't make a
     // lot of sense to me, maybe it's a mistake or maybe it compensates from something else. For
     // the time being just do whatever mednafen does.

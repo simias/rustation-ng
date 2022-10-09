@@ -1,5 +1,6 @@
 //! Geometry Transform Engine (Coprocessor 2) emulation
 
+use super::CycleCount;
 use std::{i16, u16};
 
 mod divider;
@@ -56,6 +57,11 @@ pub struct Gte {
     lzcr: u8,
     /// Register 23: 32bit read/write but not used for anything
     reg_23: u32,
+
+    /// If true the GTE operations will never stall the CPU, potentially avoiding slowdowns in some
+    /// 3D-intensive games
+    #[serde(default)]
+    overclock: bool,
 }
 
 impl Gte {
@@ -85,11 +91,16 @@ impl Gte {
             // if lzcs is 0 then lzcr is 31. lzcr can never be equal to 0.
             lzcr: 32,
             reg_23: 0,
+            overclock: false,
         }
     }
 
-    /// Execute GTE command
-    pub fn command(&mut self, command: u32) {
+    pub fn set_overclock(&mut self, overclock: bool) {
+        self.overclock = overclock;
+    }
+
+    /// Execute GTE command and returns the number of CPU cycles to completion
+    pub fn command(&mut self, command: u32) -> CycleCount {
         let opcode = command & 0x3f;
 
         let config = CommandConfig::from_command(command);
@@ -97,7 +108,7 @@ impl Gte {
         // Clear flags prior to command execution
         self.flags = 0;
 
-        match opcode {
+        let delay = match opcode {
             0x01 => self.cmd_rtps(config),
             0x06 => self.cmd_nclip(),
             0x0c => self.cmd_op(config),
@@ -120,11 +131,13 @@ impl Gte {
             0x3e => self.cmd_gpl(config),
             0x3f => self.cmd_ncct(config),
             _ => panic!("Unhandled GTE opcode {:02x}", opcode),
-        }
+        };
 
         // Update the flags MSB: OR together bits [30:23] + [18:13]
         let msb = self.flags & 0x7f87_e000 != 0;
         self.flags |= (msb as u32) << 31;
+
+        delay
     }
 
     /// Return the value of one of the "control" registers. Used by the CFC2 opcode.
@@ -623,15 +636,17 @@ impl Gte {
     }
 
     /// Rotate, Translate and Perspective transform Single. Operates on V0.
-    fn cmd_rtps(&mut self, config: CommandConfig) {
+    fn cmd_rtps(&mut self, config: CommandConfig) -> CycleCount {
         // Transform vector 0
         let projection_factor = self.do_rtp(config, 0);
 
         self.depth_queuing(projection_factor);
+
+        14
     }
 
     /// Normal clipping
-    fn cmd_nclip(&mut self) {
+    fn cmd_nclip(&mut self) -> CycleCount {
         let (x0, y0) = self.xy_fifo[0];
         let (x1, y1) = self.xy_fifo[1];
         let (x2, y2) = self.xy_fifo[2];
@@ -651,10 +666,12 @@ impl Gte {
         self.check_mac_overflow(sum);
 
         self.mac[0] = sum as i32;
+
+        7
     }
 
     /// Outer Product
-    fn cmd_op(&mut self, config: CommandConfig) {
+    fn cmd_op(&mut self, config: CommandConfig) -> CycleCount {
         let rm = Matrix::Rotation.index();
 
         let ir1 = self.ir[1] as i32;
@@ -672,10 +689,12 @@ impl Gte {
         self.mac[3] = (r0 * ir2 - r1 * ir1) >> shift;
 
         self.mac_to_ir(config);
+
+        5
     }
 
     /// Depth Queue Single
-    fn cmd_dpcs(&mut self, config: CommandConfig) {
+    fn cmd_dpcs(&mut self, config: CommandConfig) -> CycleCount {
         let fc = ControlVector::FarColor.index();
 
         let (r, g, b, _) = self.rgb;
@@ -700,10 +719,12 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        7
     }
 
     /// Depth Cue Color Light
-    fn cmd_dcpl(&mut self, config: CommandConfig) {
+    fn cmd_dcpl(&mut self, config: CommandConfig) -> CycleCount {
         let fc = ControlVector::FarColor.index();
 
         let (r, g, b, _) = self.rgb;
@@ -731,15 +752,19 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        7
     }
 
     /// Depth Queue Triple
-    fn cmd_dpct(&mut self, config: CommandConfig) {
+    fn cmd_dpct(&mut self, config: CommandConfig) -> CycleCount {
         // Each call uses the oldest entry in the RGB FIFO and pushes the result at the top so the
         // three calls will process and replace the entire contents of the FIFO
         self.do_dpc(config);
         self.do_dpc(config);
         self.do_dpc(config);
+
+        16
     }
 
     fn do_dpc(&mut self, config: CommandConfig) {
@@ -771,7 +796,7 @@ impl Gte {
     }
 
     /// Interpolate between a vector and the far color
-    fn cmd_intpl(&mut self, config: CommandConfig) {
+    fn cmd_intpl(&mut self, config: CommandConfig) -> CycleCount {
         let fc = ControlVector::FarColor.index();
 
         // XXX this is very similar to the loop in DPCS above, we could probably factor that.
@@ -794,37 +819,47 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        7
     }
 
     /// Multiply vector by matrix and add vector
-    fn cmd_mvmva(&mut self, config: CommandConfig) {
+    fn cmd_mvmva(&mut self, config: CommandConfig) -> CycleCount {
         // The fourth vector holds IR values
         self.v[3][0] = self.ir[1];
         self.v[3][1] = self.ir[2];
         self.v[3][2] = self.ir[3];
 
         self.multiply_matrix_by_vector(config, config.matrix, config.vector_mul, config.vector_add);
+
+        7
     }
 
     /// Normal Color Depth Cue Single vector
-    fn cmd_ncds(&mut self, config: CommandConfig) {
+    fn cmd_ncds(&mut self, config: CommandConfig) -> CycleCount {
         self.do_ncd(config, 0);
+
+        18
     }
 
     /// Normal Color Depth Cue Triple
-    fn cmd_ncdt(&mut self, config: CommandConfig) {
+    fn cmd_ncdt(&mut self, config: CommandConfig) -> CycleCount {
         self.do_ncd(config, 0);
         self.do_ncd(config, 1);
         self.do_ncd(config, 2);
+
+        43
     }
 
     /// Normal Color Color Single. Operates on V0
-    fn cmd_nccs(&mut self, config: CommandConfig) {
+    fn cmd_nccs(&mut self, config: CommandConfig) -> CycleCount {
         self.do_ncc(config, 0);
+
+        16
     }
 
     /// Color Color
-    fn cmd_cc(&mut self, config: CommandConfig) {
+    fn cmd_cc(&mut self, config: CommandConfig) -> CycleCount {
         self.v[3][0] = self.ir[1];
         self.v[3][1] = self.ir[2];
         self.v[3][2] = self.ir[3];
@@ -844,22 +879,27 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        10
     }
 
     /// Normal Color Single
-    fn cmd_ncs(&mut self, config: CommandConfig) {
+    fn cmd_ncs(&mut self, config: CommandConfig) -> CycleCount {
         self.do_nc(config, 0);
+        13
     }
 
     /// Normal Color Triple
-    fn cmd_nct(&mut self, config: CommandConfig) {
+    fn cmd_nct(&mut self, config: CommandConfig) -> CycleCount {
         self.do_nc(config, 0);
         self.do_nc(config, 1);
         self.do_nc(config, 2);
+
+        29
     }
 
     /// Square vector
-    fn cmd_sqr(&mut self, config: CommandConfig) {
+    fn cmd_sqr(&mut self, config: CommandConfig) -> CycleCount {
         for i in 1..4 {
             let ir = self.ir[i] as i32;
 
@@ -867,10 +907,12 @@ impl Gte {
         }
 
         self.mac_to_ir(config);
+
+        4
     }
 
     /// Average three Z values
-    fn cmd_avsz3(&mut self) {
+    fn cmd_avsz3(&mut self) -> CycleCount {
         let z1 = self.z_fifo[1] as u32;
         let z2 = self.z_fifo[2] as u32;
         let z3 = self.z_fifo[3] as u32;
@@ -888,10 +930,12 @@ impl Gte {
 
         self.mac[0] = average as i32;
         self.otz = self.i64_to_otz(average);
+
+        4
     }
 
     /// Average four Z values
-    fn cmd_avsz4(&mut self) {
+    fn cmd_avsz4(&mut self) -> CycleCount {
         let z0 = self.z_fifo[0] as u32;
         let z1 = self.z_fifo[1] as u32;
         let z2 = self.z_fifo[2] as u32;
@@ -910,10 +954,12 @@ impl Gte {
 
         self.mac[0] = average as i32;
         self.otz = self.i64_to_otz(average);
+
+        4
     }
 
     /// Rotate, Translate and Perspective transform Triple. Operates on V0, V1 and V2
-    fn cmd_rtpt(&mut self, config: CommandConfig) {
+    fn cmd_rtpt(&mut self, config: CommandConfig) -> CycleCount {
         // Transform the three vectors at once
         self.do_rtp(config, 0);
         self.do_rtp(config, 1);
@@ -921,10 +967,12 @@ impl Gte {
         let projection_factor = self.do_rtp(config, 2);
 
         self.depth_queuing(projection_factor);
+
+        22
     }
 
     /// General purpose interpolation
-    fn cmd_gpf(&mut self, config: CommandConfig) {
+    fn cmd_gpf(&mut self, config: CommandConfig) -> CycleCount {
         let ir0 = self.ir[0] as i32;
 
         for i in 1..4 {
@@ -935,10 +983,12 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        4
     }
 
     /// General purpose interpolation with base
-    fn cmd_gpl(&mut self, config: CommandConfig) {
+    fn cmd_gpl(&mut self, config: CommandConfig) -> CycleCount {
         let ir0 = self.ir[0] as i32;
 
         let shift = config.shift;
@@ -957,14 +1007,18 @@ impl Gte {
 
         self.mac_to_ir(config);
         self.mac_to_rgb_fifo();
+
+        4
     }
 
     /// Normal Color Color Triple. Operates on V0, V1 and V2
-    fn cmd_ncct(&mut self, config: CommandConfig) {
+    fn cmd_ncct(&mut self, config: CommandConfig) -> CycleCount {
         // Transform the three vectors at once
         self.do_ncc(config, 0);
         self.do_ncc(config, 1);
         self.do_ncc(config, 2);
+
+        38
     }
 
     fn do_ncc(&mut self, config: CommandConfig, vector_index: u8) {
