@@ -498,7 +498,10 @@ pub fn load<T: Addressable>(psx: &mut Psx, off: u32) -> T {
         8 => u32::from(psx.pad_memcard.mode),
         10 => u32::from(psx.pad_memcard.control()),
         14 => u32::from(psx.pad_memcard.baud_div),
-        _ => unimplemented!("gamepad read {:?} 0x{:x}", T::width(), off),
+        _ => {
+            warn!("pad_memcard read {:?} 0x{:x}", T::width(), off);
+            0
+        }
     };
 
     predict_next_sync(psx);
