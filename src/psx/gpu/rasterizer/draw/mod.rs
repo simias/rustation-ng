@@ -48,7 +48,7 @@ pub struct Rasterizer {
     draw_offset_y: i32,
     /// Mask bit settings
     mask_settings: MaskSettings,
-    /// Texture mapping state
+    /// Texture mapping + caching
     tex_mapper: TextureMapper,
     /// If true we output the entire contents of the VRAM instead of just the visible portion
     display_full_vram: bool,
@@ -1243,6 +1243,10 @@ impl Rasterizer {
         }
     }
 
+    fn set_clut(&mut self, clut: u32) {
+        self.tex_mapper.set_clut(clut, &self.vram);
+    }
+
     fn get_texel(&self, u: u8, v: u8) -> Pixel {
         self.tex_mapper.get_texel(u, v, &self.vram)
     }
@@ -1304,7 +1308,7 @@ impl Rasterizer {
 
     fn truncate_component(&self, c: u8) -> u8 {
         // If you look at DITHER_OFFSETS when we build the table you can see that
-        // DITHER_OFFSETS[0][1] is equal to 0, therefore even if dithering is enabled this won't
+        // DITHER_OFFSETS[0][1] is equal to 0, therefore even if dithering is disabled this won't
         // actually modify the value of the pixel beyond normal saturation and truncation.
         //
         // If draw_24bpp is true this is a nop since the entry in the table will be the same value
@@ -1561,8 +1565,11 @@ struct TextureMapper {
     /// Shift value to convert a number of texels into a number of VRAM pixels. In other words, you
     /// have `(1 << pixel_to_texel_shift)` texels per VRAM pixel.
     pixel_to_texel_shift: u8,
-    /// Offset of the start of the CLUT in VRAM
-    clut_off: u32,
+    /// Cache for color LUTs
+    #[serde(with = "serde_big_array::BigArray")]
+    clut_cache: [Pixel; 0x100],
+    /// Key used to see if the CLUT cache should be reloaded (set to !0 when invalidated)
+    clut_key: u32,
 }
 
 impl TextureMapper {
@@ -1575,7 +1582,8 @@ impl TextureMapper {
             u_offset: 0,
             v_offset: 0,
             pixel_to_texel_shift: 0,
-            clut_off: 0,
+            clut_cache: [Pixel(0); 0x100],
+            clut_key: !0,
         }
     }
 
@@ -1583,15 +1591,41 @@ impl TextureMapper {
         self.draw_mode.set(0);
         self.tex_window.set(0);
         self.update_texture_params();
+        self.cache_invalidate();
     }
 
-    pub fn set_clut(&mut self, clut: u32) {
-        let clut = clut >> 16;
+    pub fn cache_invalidate(&mut self) {
+        self.clut_key = !0;
+    }
+
+    pub fn set_clut(&mut self, clut: u32, vram: &[Pixel; 1024 * 512]) {
+        let pts = self.pixel_to_texel_shift as u32;
+        if pts == 0 {
+            // We're in "truecolor" mode, the palette is not in use
+            return;
+        }
+
+        let clut = (clut >> 16) & 0x7fff;
+
+        // The key is unique for a given clut coord and texture depth
+        let key = clut | (pts << 16);
+
+        if key == self.clut_key {
+            // Already cached
+            return;
+        }
+
+        self.clut_key = key;
 
         let clut_x = (clut & 0x3f) << 4;
         let clut_y = (clut >> 6) & 0x1ff;
 
-        self.clut_off = clut_y * 1024 + clut_x;
+        let clut_off = (clut_y * 1024 + clut_x) as usize;
+
+        // 256 for 8bpp, 16 for 4bpp
+        let nentries = 256 >> ((pts - 1) * 4);
+
+        self.clut_cache[..nentries].copy_from_slice(&vram[clut_off..(clut_off + nentries)]);
     }
 
     pub fn set_draw_mode(&mut self, mode: u32) {
@@ -1660,9 +1694,7 @@ impl TextureMapper {
 
         let clut_key = (raw >> u_shift) & key_mask;
 
-        let fb_pos = self.clut_off + u32::from(clut_key);
-
-        vram[fb_pos as usize]
+        self.clut_cache[clut_key as usize]
     }
 }
 
@@ -1908,6 +1940,8 @@ where
 
     let mut index = 0;
     let mut cur_color = Pixel::black();
+    let mut clut = 0;
+    let mut mode = 0;
 
     // Load the vertex data from the command
     for (v, vertex) in vertices.iter_mut().enumerate() {
@@ -1927,14 +1961,19 @@ where
 
         if Texture::is_textured() {
             if v == 0 {
-                rasterizer.tex_mapper.set_clut(params[index]);
+                clut = params[index];
             } else if v == 1 {
-                // Update texture page
-                rasterizer.tex_mapper.update_mode_from_poly(params[index]);
+                mode = params[index];
             }
             vertex.set_texture_uv(params[index]);
             index += 1;
         }
+    }
+
+    if Texture::is_textured() {
+        // Needs to happen in this order since `mode` can change the CLUT in use
+        rasterizer.tex_mapper.update_mode_from_poly(mode);
+        rasterizer.set_clut(clut);
     }
 
     if rasterizer.draw_polygons {
@@ -1988,6 +2027,9 @@ where
     let mut index = 0;
     let mut cur_color = Pixel::black();
 
+    let mut clut = 0;
+    let mut mode = 0;
+
     // Load the vertex data from the command
     for (v, vertex) in vertices.iter_mut().enumerate() {
         if v == 0 || Shading::is_shaded() {
@@ -2005,14 +2047,19 @@ where
 
         if Texture::is_textured() {
             if v == 0 {
-                rasterizer.tex_mapper.set_clut(params[index]);
+                clut = params[index];
             } else if v == 1 {
-                // Update texture page
-                rasterizer.tex_mapper.update_mode_from_poly(params[index]);
+                mode = params[index];
             }
             vertex.set_texture_uv(params[index]);
             index += 1;
         }
+    }
+
+    if Texture::is_textured() {
+        // Needs to happen in this order since `mode` can change the CLUT in use
+        rasterizer.tex_mapper.update_mode_from_poly(mode);
+        rasterizer.set_clut(clut);
     }
 
     if rasterizer.draw_polygons {
@@ -2055,7 +2102,7 @@ fn cmd_handle_rect<Transparency, Texture>(
     origin.position.y += rasterizer.draw_offset_y;
 
     if Texture::is_textured() {
-        rasterizer.tex_mapper.set_clut(params[index]);
+        rasterizer.set_clut(params[index]);
         origin.set_texture_uv(params[index]);
         index += 1;
     }
@@ -2375,8 +2422,8 @@ fn cmd_mask_settings(rasterizer: &mut Rasterizer, params: &[u32]) {
     rasterizer.mask_settings.set(mask_settings);
 }
 
-fn cmd_clear_cache(_rasterizer: &mut Rasterizer, _params: &[u32]) {
-    // TODO: no cache support for now
+fn cmd_clear_cache(rasterizer: &mut Rasterizer, _params: &[u32]) {
+    rasterizer.tex_mapper.cache_invalidate();
 }
 
 /// Placeholder function

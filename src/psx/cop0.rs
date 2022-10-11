@@ -60,7 +60,7 @@ pub fn mtc0(psx: &mut Psx, cop_r: RegisterIndex, v: u32) {
         // Breakpoints registers
         3 | 5 | 6 | 7 | 9 | 11 => {
             if v != 0 {
-                panic!("Unhandled write to cop0r{}: {:08x}", cop_r.0, v)
+                warn!("Unhandled write to cop0r{}: {:08x}", cop_r.0, v)
             }
         }
         12 => {
