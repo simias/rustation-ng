@@ -121,8 +121,13 @@ impl Cpu {
 
     /// Rebase our internal counters that are relative to the global `cycle_counter`
     pub fn rebase_counters(&mut self, cycle_counter: CycleCount) {
-        self.mult_div_end -= cycle_counter;
-        self.gte_command_end -= cycle_counter;
+        if self.mult_div_end > 0 {
+            self.mult_div_end -= cycle_counter;
+        }
+
+        if self.gte_command_end > 0 {
+            self.gte_command_end -= cycle_counter;
+        }
     }
 
     /// Return the current value of register `index`
