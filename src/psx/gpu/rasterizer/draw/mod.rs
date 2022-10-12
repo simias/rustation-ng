@@ -1247,7 +1247,7 @@ impl Rasterizer {
         self.tex_mapper.set_clut(clut, &self.vram);
     }
 
-    fn get_texel(&self, u: u8, v: u8) -> Pixel {
+    fn get_texel(&mut self, u: u8, v: u8) -> Pixel {
         self.tex_mapper.get_texel(u, v, &self.vram)
     }
 
@@ -1569,13 +1569,16 @@ struct TextureMapper {
     #[serde(with = "serde_big_array::BigArray")]
     clut_cache: [Pixel; 0x100],
     /// Key used to see if the CLUT cache should be reloaded (set to !0 when invalidated)
-    clut_key: u32,
+    clut_tag: u32,
+    /// Texture cache
+    #[serde(with = "serde_big_array::BigArray")]
+    texture_cache: [CacheLine; 0x100],
 }
 
 impl TextureMapper {
     pub fn new() -> TextureMapper {
         TextureMapper {
-            draw_mode: DrawMode::new(),
+            draw_mode: DrawMode::new(0),
             tex_window: TextureWindow::new(),
             u_mask: 0,
             v_mask: 0,
@@ -1583,19 +1586,24 @@ impl TextureMapper {
             v_offset: 0,
             pixel_to_texel_shift: 0,
             clut_cache: [Pixel(0); 0x100],
-            clut_key: !0,
+            clut_tag: !0,
+            texture_cache: [CacheLine::new(); 0x100],
         }
     }
 
     pub fn reset(&mut self) {
-        self.draw_mode.set(0);
+        self.draw_mode = DrawMode::new(0);
         self.tex_window.set(0);
         self.update_texture_params();
         self.cache_invalidate();
     }
 
     pub fn cache_invalidate(&mut self) {
-        self.clut_key = !0;
+        self.clut_tag = !0;
+
+        for l in self.texture_cache.iter_mut() {
+            l.invalidate();
+        }
     }
 
     pub fn set_clut(&mut self, clut: u32, vram: &[Pixel; 1024 * 512]) {
@@ -1608,14 +1616,14 @@ impl TextureMapper {
         let clut = (clut >> 16) & 0x7fff;
 
         // The key is unique for a given clut coord and texture depth
-        let key = clut | (pts << 16);
+        let tag = clut | (pts << 16);
 
-        if key == self.clut_key {
+        if tag == self.clut_tag {
             // Already cached
             return;
         }
 
-        self.clut_key = key;
+        self.clut_tag = tag;
 
         let clut_x = (clut & 0x3f) << 4;
         let clut_y = (clut >> 6) & 0x1ff;
@@ -1629,7 +1637,17 @@ impl TextureMapper {
     }
 
     pub fn set_draw_mode(&mut self, mode: u32) {
-        self.draw_mode.set(mode);
+        let new_mode = DrawMode::new(mode);
+
+        if new_mode.texture_page_x() != self.draw_mode.texture_page_x()
+            || new_mode.texture_page_y() != self.draw_mode.texture_page_y()
+            || new_mode.texture_depth() != self.draw_mode.texture_depth()
+            || new_mode.texture_disable() != self.draw_mode.texture_disable()
+        {
+            self.cache_invalidate();
+        }
+
+        self.draw_mode = new_mode;
         self.update_texture_params();
     }
 
@@ -1660,7 +1678,7 @@ impl TextureMapper {
         self.v_offset += tp_y;
     }
 
-    pub fn get_texel(&self, u: u8, v: u8, vram: &[Pixel; 1024 * 512]) -> Pixel {
+    pub fn get_texel(&mut self, u: u8, v: u8, vram: &[Pixel; 1024 * 512]) -> Pixel {
         let pts = u16::from(self.pixel_to_texel_shift);
         let fb_u = u16::from(u & self.u_mask) + self.u_offset;
         let fb_v = u16::from(v & self.v_mask) + self.v_offset;
@@ -1668,8 +1686,35 @@ impl TextureMapper {
         let fb_x = (fb_u >> pts) & 0x3ff;
         let fb_y = fb_v;
 
-        let fb_off = usize::from(fb_y) * 1024 + usize::from(fb_x);
-        let raw = vram[fb_off as usize];
+        let cache_index = if pts == 2 {
+            // 4bpp: texture cache is organized in blocks of 4 x 64 cachelines
+            //
+            // Each cacheline is 4 16bpp pixel wide (16 4bpp pixels) that means that the total
+            // block size is 64x64 texels.
+            ((fb_y << 2) | ((fb_x >> 2) & 3)) & 0xff
+        } else {
+            // 8/16bpp: texture cache is organized in blocks of 8x32 cachelines
+            //
+            // Each cacheline is 4 16bpp pixel wide (8 8bpp pixels) that means that the total
+            // block size is 64x32 texels for 8bpp and 32x64 for 16bpp.
+            ((fb_y << 3) | ((fb_x >> 2) & 7)) & 0xff
+        };
+
+        let cacheline = &mut self.texture_cache[usize::from(cache_index)];
+
+        let fb_off = u32::from(fb_y) * 1024 + u32::from(fb_x);
+        let tag = fb_off & !3;
+
+        if cacheline.tag != tag {
+            // Need to fetch the cacheline
+            cacheline.tag = tag;
+
+            let tag = tag as usize;
+
+            cacheline.pixels.copy_from_slice(&vram[tag..(tag + 4)])
+        }
+
+        let raw = cacheline.pixels[(fb_off & 3) as usize];
 
         if pts == 0 {
             // True color mode, we return the texture value as-is
@@ -2297,6 +2342,9 @@ fn cmd_vram_copy(rasterizer: &mut Rasterizer, params: &[u32]) {
 
     let (width, height) = vram_access_dimensions(dim, false);
 
+    // From mednafen, is it because it's used as a temporary buffer for the copy?
+    rasterizer.tex_mapper.cache_invalidate();
+
     // XXX Mednafen uses a temporary buffer of 128 pixels here, presumably to emulate artifacts
     // when the source and destination zones overlap? Needs more testing.
     for y in 0..height {
@@ -2322,6 +2370,8 @@ fn cmd_vram_store(rasterizer: &mut Rasterizer, params: &[u32]) {
 
     let (width, height) = vram_access_dimensions(dim, false);
 
+    rasterizer.tex_mapper.cache_invalidate();
+
     let store = VRamStore::new(left, top, width as u16, height as u16);
 
     rasterizer.state = State::VRamStore(store);
@@ -2335,6 +2385,8 @@ fn cmd_vram_load(rasterizer: &mut Rasterizer, params: &[u32], frame_channel: &mp
     let top = ((pos >> 16) & 0x3ff) as u16;
 
     let (width, height) = vram_access_dimensions(dim, true);
+
+    rasterizer.tex_mapper.cache_invalidate();
 
     if width == 0 || height == 0 {
         // Nothing to do
@@ -3495,5 +3547,27 @@ mod serialize_dither_table {
         D: Deserializer<'de>,
     {
         Ok([[[0; 0x200]; 4]; 4])
+    }
+}
+
+/// Texture cache line containing 4 pixels
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone)]
+struct CacheLine {
+    pixels: [Pixel; 4],
+    tag: u32,
+}
+
+impl CacheLine {
+    const TAG_INVALID: u32 = !0;
+
+    fn new() -> CacheLine {
+        CacheLine {
+            pixels: [Pixel(0); 4],
+            tag: CacheLine::TAG_INVALID,
+        }
+    }
+
+    fn invalidate(&mut self) {
+        self.tag = CacheLine::TAG_INVALID;
     }
 }

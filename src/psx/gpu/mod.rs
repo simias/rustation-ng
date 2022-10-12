@@ -103,7 +103,7 @@ impl Gpu {
             display_active: false,
             display_vram_x_start: 0,
             display_vram_y_start: 0,
-            draw_mode: DrawMode::new(),
+            draw_mode: DrawMode::new(0),
             dma_direction: DmaDirection::Off,
             command_fifo: fifo::CommandFifo::new(),
             draw_time_budget: 0,
@@ -174,7 +174,7 @@ impl Gpu {
         self.display_column_start = 0x200;
         self.display_column_end = 0xc00;
 
-        self.draw_mode.set(0);
+        self.draw_mode = DrawMode::new(0);
         self.display_mode.set(0);
         self.dma_direction.set(0);
 
@@ -856,12 +856,8 @@ impl State {
 struct DrawMode(u32);
 
 impl DrawMode {
-    fn new() -> DrawMode {
-        DrawMode(0)
-    }
-
-    fn set(&mut self, mode: u32) {
-        self.0 = mode;
+    fn new(mode: u32) -> DrawMode {
+        DrawMode(mode)
     }
 
     /// Update from a polygon draw command. When that happens it overwrites the previous value
@@ -892,8 +888,12 @@ impl DrawMode {
         y << 8
     }
 
+    fn texture_depth(self) -> u8 {
+        ((self.0 >> 7) & 3) as u8
+    }
+
     fn pixel_to_texel_shift(self) -> u8 {
-        match (self.0 >> 7) & 3 {
+        match self.texture_depth() {
             0 => 2, // Paletted 4bpp
             1 => 1, // Paletted 8bpp
             2 => 0, // True Color 1555BGR, 16bits per pixel

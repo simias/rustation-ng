@@ -1,6 +1,6 @@
 //! Implementation of the various GP0 commands.
 
-use super::{CycleCount, Psx, State};
+use super::{CycleCount, DrawMode, Psx, State};
 use std::cmp::max;
 
 /// Description of the various GP0 commands
@@ -701,7 +701,7 @@ fn cmd_vram_load(psx: &mut Psx) {
 fn cmd_draw_mode(psx: &mut Psx) {
     let mode = psx.gpu.command_pop_to_rasterizer();
 
-    psx.gpu.draw_mode.set(mode);
+    psx.gpu.draw_mode = DrawMode::new(mode);
 }
 
 fn cmd_tex_window(psx: &mut Psx) {
