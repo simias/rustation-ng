@@ -266,10 +266,16 @@ fn output_samples(psx: &mut Psx, left: i16, right: i16) {
     let idx = psx.spu.audio_buffer_index as usize;
 
     // If this overflows the frontend isn't reading the samples fast enough
-    psx.spu.audio_buffer[idx] = left;
-    psx.spu.audio_buffer[idx + 1] = right;
-
-    psx.spu.audio_buffer_index += 2;
+    if psx.spu.audio_buffer.len() > idx + 1 {
+        psx.spu.audio_buffer[idx] = left;
+        psx.spu.audio_buffer[idx + 1] = right;
+        psx.spu.audio_buffer_index += 2;
+    } else {
+        warn!("Frontend isn't reading our audio samples fast enough");
+        // Flush the entire buffer to give us some leeway, better to have one big glitch than many
+        // small ones
+        psx.spu.audio_buffer_index = 0;
+    }
 }
 
 /// Emulate one cycle of the SPU
