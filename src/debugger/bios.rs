@@ -54,18 +54,13 @@ mod vectors {
 
     type ParamHandler = fn(psx: &mut Psx, reg: u32) -> String;
 
-    /// Return true if c is a printable ASCII character (including whitespace)
-    fn is_printable(c: char) -> bool {
-        c >= ' ' && c <= '~'
-    }
-
     fn display_char(c: char) -> String {
         match c {
             '\\' => "\\\\".into(),
             '"' => "\"".into(),
             '\'' => "'".into(),
             _ => {
-                if is_printable(c) {
+                if c.is_ascii_graphic() || c == ' ' {
                     format!("{}", c)
                 } else {
                     match c {

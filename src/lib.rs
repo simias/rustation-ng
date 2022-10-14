@@ -47,6 +47,8 @@ mod error;
 mod memory_card;
 #[macro_use]
 pub mod libretro;
+#[cfg(feature = "debugger")]
+mod debugger;
 mod psx;
 mod retrolog;
 
@@ -115,6 +117,19 @@ impl Context {
         libretro::Context::refresh_variables(&mut ctx);
 
         ctx.setup_memory_cards();
+
+        #[cfg(feature = "debugger")]
+        {
+            let mut debugger = Box::new(debugger::Debugger::new());
+
+            // Set to true to log BIOS API calls
+            debugger.set_log_bios_calls(false);
+
+            psx::debugger::swap_debugger(debugger);
+
+            // Trigger the debugger immediately to wait for a connection
+            psx::debugger::trigger_break(&mut ctx.psx);
+        }
 
         Ok(ctx)
     }

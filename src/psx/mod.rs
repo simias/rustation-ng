@@ -342,7 +342,12 @@ impl Psx {
             return Addressable::from_u32(self.ram_size);
         }
 
-        panic!("Unhandled load at address {:08x}", abs_addr);
+        if cfg!(feature = "debugger") {
+            warn!("Unhandled load at address {:08x}", abs_addr);
+            Addressable::from_u32(0xdeaddead)
+        } else {
+            panic!("Unhandled load at address {:08x}", abs_addr);
+        }
     }
 
     /// Decode `address` and perform the store to the target module

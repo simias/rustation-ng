@@ -58,7 +58,7 @@ impl GdbRemote {
             InPacket,
             WaitForCheckSum,
             WaitForCheckSum2(u8),
-        };
+        }
 
         let mut state = State::WaitForStart;
 
@@ -248,10 +248,10 @@ impl GdbRemote {
         self.send_reply(reply)
     }
 
-    /// When dumping 32bit values we reserve an unused memory range to dump values that can't be
-    /// accessed otherwise with GDB, such as coprocessor registers
     fn examine_word(&mut self, psx: &mut Psx, addr: u32) -> u32 {
-        if addr >= 0xbad0_0000 && addr <= 0xbad0_ffff {
+        // When dumping 32bit values we reserve an unused memory range to dump values that can't be
+        // accessed otherwise with GDB, such as coprocessor registers
+        if (0xbad0_0000..=0xbad0_ffff).contains(&addr) {
             let off = (addr - 0xbad0_0000) / 4;
 
             match off {
@@ -426,13 +426,12 @@ enum PacketResult {
     EndOfStream,
 }
 
-/// Get the value of an integer encoded in single lowercase
-/// hexadecimal ASCII digit. Return None if the character is not valid
-/// hexadecimal
+/// Get the value of an integer encoded in single lowercase hexadecimal ASCII digit. Return None if
+/// the character is not valid hexadecimal
 fn ascii_hex(b: u8) -> Option<u8> {
-    if b >= b'0' && b <= b'9' {
+    if b.is_ascii_digit() {
         Some(b - b'0')
-    } else if b >= b'a' && b <= b'f' {
+    } else if b.is_ascii_hexdigit() {
         Some(10 + (b - b'a'))
     } else {
         // Invalid
