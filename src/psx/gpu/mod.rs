@@ -491,6 +491,11 @@ pub fn run(psx: &mut Psx) {
     sync::next_event(psx, GPUSYNC, delta as CycleCount);
 }
 
+pub fn dma_can_write(psx: &mut Psx) -> bool {
+    run(psx);
+    psx.gpu.dma_can_write()
+}
+
 /// Called when we reach the end of line (just after the HSYNC)
 fn handle_eol(psx: &mut Psx) {
     let mut eof = false;

@@ -5,6 +5,7 @@
 
 define rsx
     set output-radix 16
+    set step-mode on
     target remote localhost:9001
 end
 document rsx

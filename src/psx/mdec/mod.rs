@@ -144,7 +144,7 @@ impl MDec {
                             self.command_remaining = 32;
                             self.state = State::LoadIdctMatrix;
                         }
-                        o => unimplemented!("Command {:x}", o),
+                        o => unimplemented!("MDEC command {:x}", o),
                     }
                 }
                 State::LoadQuantTable(index) => {
@@ -204,16 +204,20 @@ impl MDec {
                     self.decode_rle((next_word >> 16) as u16);
 
                     if !self.output_buffer.is_empty() {
-                        self.state = State::OutputBlock;
+                        self.state = State::StallOutput;
                     } else if self.command_remaining == 0 {
                         self.state = State::Idle;
                     }
                 }
-                State::OutputBlock => {
+                State::StallOutput => {
+                    // I don't know if this is truly necessary or if it's just a side effect of
+                    // mednafen's macro coding.
                     if self.decoder_cycle_budget <= 0 {
                         return;
                     }
-
+                    self.state = State::OutputBlock;
+                }
+                State::OutputBlock => {
                     if self.output_fifo.is_full() {
                         return;
                     }
@@ -279,6 +283,7 @@ impl MDec {
 
     pub fn dma_can_write(&self) -> bool {
         // XXX From Mednafen, does it really only work if the FIFO is empty?
+        // -> Probably yes, since the DMA wants to write 0x20 words at once (block size)
         self.input_fifo.is_empty()
             && self.dma_in_enabled
             && self.state.is_busy()
@@ -287,6 +292,7 @@ impl MDec {
 
     pub fn dma_can_read(&self) -> bool {
         // XXX From Mednafen, does it really only work if the FIFO is full?
+        // -> Probably yes, since the DMA wants to read 0x20 words at once (block size)
         self.output_fifo.is_full() && self.dma_out_enabled
     }
 
@@ -491,7 +497,12 @@ pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
     let val = val.as_u32();
 
     match off {
-        0 => psx.mdec.push_command(val),
+        0 => {
+            psx.mdec.push_command(val);
+            if !psx.mdec.is_busy() && psx.mdec.decoder_cycle_budget < 1 {
+                psx.mdec.decoder_cycle_budget = 1;
+            }
+        }
         4 => psx.mdec.set_control(val),
         _ => unimplemented!("Unhandled MDEC store: {:08x} {:08x}", off, val),
     }
@@ -553,6 +564,9 @@ pub fn dma_load(psx: &mut Psx) -> (u32, u32) {
         mdec.dma_block_line = mdec.dma_block_line.wrapping_add(1);
     }
 
+    // Run to keep feeding the output FIFO if we still have data
+    run(psx);
+
     (v, (offset as u32) << 2)
 }
 
@@ -563,6 +577,7 @@ enum State {
     LoadQuantTable(u8),
     LoadIdctMatrix,
     Decoding,
+    StallOutput,
     OutputBlock,
 }
 

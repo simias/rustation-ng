@@ -3,7 +3,7 @@
 use super::{cpu, Psx};
 
 /// The PlayStation supports 10 interrupts
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interrupt {
     /// Display in vertical blanking
     VBlank = 0,

@@ -538,8 +538,8 @@ impl Rasterizer {
 
                     if !self.draw_24bpp {
                         // 8-to-5 bit truncation. Since we always output 24 bits per pixel we just
-                        // replace the LSBs with the MSBs (this ways blacks remain blacks and
-                        // whites remain white and we effectively lose 3 significant bits)
+                        // replace the LSBs with the MSBs (this ways blacks remain black and whites
+                        // remain white and we effectively lose 3 significant bits)
                         out &= 0xf8;
                         out |= out >> 5;
                     }

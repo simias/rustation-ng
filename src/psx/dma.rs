@@ -34,9 +34,7 @@ impl Dma {
             period_counter: 0,
         }
     }
-}
 
-impl Dma {
     /// Signal that channel `port` is done running. Returns true if an interrupt should be
     /// triggered
     fn end_of_dma(&mut self, port: Port) -> IrqState {
@@ -68,6 +66,7 @@ pub fn run(psx: &mut Psx) {
     // XXX We probably should only call that if the GPU channel is active but that will make our
     // timings diverge from mednafen so let's not for the time being.
     gpu::run(psx);
+    mdec::run(psx);
 
     let elapsed = sync::resync(psx, DMASYNC);
 
@@ -384,7 +383,7 @@ fn can_run(psx: &mut Psx, port: Port, write: bool) -> bool {
     if write {
         match port {
             Port::Spu => true,
-            Port::Gpu => psx.gpu.dma_can_write(),
+            Port::Gpu => gpu::dma_can_write(psx),
             Port::MDecIn => mdec::dma_can_write(psx),
             _ => unimplemented!("Can write {:?}?", port),
         }

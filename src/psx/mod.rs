@@ -304,9 +304,14 @@ impl Psx {
             // We could try to emulate this behaviour by keeping track of the previously loaded
             // value and use that but it's unclear if any game relies on this edge case.
             //
-            // Mednafen sets the high bits to 0x1f80_0000. It's unclear where that comes from, I
-            // assume that some game relies on this value somehow? Let's err on the side of caution
-            // and do the same thing.
+            // So why 0x1f80 in the high bits?
+            //
+            // In the BIOS IRQ handler just before loading the value of the mask the code loads the
+            // base address of the IRQ handler (0x1f801070) then does an LW of the mask (base + 4).
+            // In this case the load will return 0x1f80 in the high 16 bits.
+            //
+            // So any code that does "load IRQ register address -> load IRQ register" in sequence
+            // will have 1f80 in the high bits, so it's a sane default.
             return Addressable::from_u32(v | 0x1f80_0000);
         }
 

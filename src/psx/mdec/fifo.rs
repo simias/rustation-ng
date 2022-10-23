@@ -22,7 +22,7 @@ impl Fifo {
     }
 
     pub fn is_full(&self) -> bool {
-        self.len() == 0x20
+        self.len() == self.buffer.len()
     }
 
     pub fn len(&self) -> usize {
