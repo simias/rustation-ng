@@ -2307,8 +2307,8 @@ impl VRamStore {
     }
 
     fn target_vram_offset(&self) -> usize {
-        let x = (self.x % 1024) as usize;
-        let y = (self.y % 512) as usize;
+        let x = (self.x & 0x3ff) as usize;
+        let y = (self.y & 0x1ff) as usize;
 
         y * 1024 + x
     }
@@ -2348,11 +2348,11 @@ fn cmd_vram_copy(rasterizer: &mut Rasterizer, params: &[u32]) {
     // XXX Mednafen uses a temporary buffer of 128 pixels here, presumably to emulate artifacts
     // when the source and destination zones overlap? Needs more testing.
     for y in 0..height {
-        let sy = (y + src_y) % 0x1ff;
-        let dy = (y + dst_y) % 0x1ff;
+        let sy = (y + src_y) & 0x1ff;
+        let dy = (y + dst_y) & 0x1ff;
         for x in 0..width {
-            let sx = (x + src_x) % 0x3ff;
-            let dx = (x + dst_x) % 0x3ff;
+            let sx = (x + src_x) & 0x3ff;
+            let dx = (x + dst_x) & 0x3ff;
 
             let p = rasterizer.read_pixel(sx, sy);
             // VRAM copy respects mask bit settings
