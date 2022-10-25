@@ -124,7 +124,8 @@ impl SerialNumber {
             return Err(PsxError::NoSerialNumber);
         }
 
-        if bin[4] != b'_' {
+        // Ridge Racer (NA) uses "SCUS-943.00"
+        if bin[4] != b'_' && bin[4] != b'-' {
             // This will fail for the few "lightspan educational" discs since they have a serial
             // number looking like "LSP-123456". Those games are fairly obscure and some of them
             // seem to have weird and nonstandards SYSTEM.CNF anyway.

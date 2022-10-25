@@ -475,7 +475,7 @@ pub fn store<T: Addressable>(psx: &mut Psx, off: u32, val: T) {
             irq::set_level(psx, Interrupt::PadMemCard, psx.pad_memcard.interrupt);
         }
         14 => psx.pad_memcard.baud_div = v,
-        _ => unimplemented!("Write to gamepad register {} {:04x}", off, v),
+        _ => warn!("Write to gamepad register {} {:04x}", off, v),
     }
 
     psx.pad_memcard.maybe_exchange_byte();
