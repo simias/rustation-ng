@@ -2342,21 +2342,33 @@ fn cmd_vram_copy(rasterizer: &mut Rasterizer, params: &[u32]) {
 
     let (width, height) = vram_access_dimensions(dim, false);
 
-    // From mednafen, is it because it's used as a temporary buffer for the copy?
+    // From mednafen, is it because it's used as a temporary buffer for the copy? Is there a
+    // different buffer?
     rasterizer.tex_mapper.cache_invalidate();
 
-    // XXX Mednafen uses a temporary buffer of 128 pixels here, presumably to emulate artifacts
-    // when the source and destination zones overlap? Needs more testing.
     for y in 0..height {
         let sy = (y + src_y) & 0x1ff;
-        let dy = (y + dst_y) & 0x1ff;
-        for x in 0..width {
-            let sx = (x + src_x) & 0x3ff;
-            let dx = (x + dst_x) & 0x3ff;
+        let ty = (y + dst_y) & 0x1ff;
 
-            let p = rasterizer.read_pixel(sx, sy);
-            // VRAM copy respects mask bit settings
-            rasterizer.draw_pixel::<Opaque, NoTexture>(dx, dy, p);
+        for x in (0..width).step_by(128) {
+            // The use of a 128px intermediate buffer is taken from mednafen
+            let mut copy_buf: [Pixel; 128] = [Pixel(0); 128];
+
+            let w = std::cmp::min(width - x, 128);
+
+            for dx in 0..w {
+                let sx = (src_x + x + dx) & 0x3ff;
+                copy_buf[dx as usize] = rasterizer.read_pixel(sx, sy);
+            }
+
+            for dx in 0..w {
+                let tx = (dst_x + x + dx) & 0x3ff;
+
+                let p = copy_buf[dx as usize];
+
+                // VRAM copy respects mask bit settings
+                rasterizer.draw_pixel::<Opaque, NoTexture>(tx, ty, p);
+            }
         }
     }
 }
