@@ -1203,7 +1203,7 @@ impl Rasterizer {
         let mut green = FpVar::new_center(start.green());
         let mut blue = FpVar::new_center(start.blue());
 
-        for _t in 0..long_edge {
+        for _t in 0..=long_edge {
             let x = lx.truncate() & 0x7ff;
             let y = ly.truncate() & 0x7ff;
             let r = red.truncate();
