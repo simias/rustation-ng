@@ -116,6 +116,7 @@ impl Gte {
             0x11 => self.cmd_intpl(config),
             0x12 => self.cmd_mvmva(config),
             0x13 => self.cmd_ncds(config),
+            0x14 => self.cmd_cdp(config),
             0x16 => self.cmd_ncdt(config),
             0x1b => self.cmd_nccs(config),
             0x1c => self.cmd_cc(config),
@@ -840,6 +841,19 @@ impl Gte {
         self.do_ncd(config, 0);
 
         18
+    }
+
+    /// Color Depth Cue
+    fn cmd_cdp(&mut self, config: CommandConfig) -> CycleCount {
+        self.v[3][0] = self.ir[1];
+        self.v[3][1] = self.ir[2];
+        self.v[3][2] = self.ir[3];
+
+        self.multiply_matrix_by_vector(config, Matrix::Color, 3, ControlVector::BackgroundColor);
+
+        self.cmd_dcpl(config);
+
+        13
     }
 
     /// Normal Color Depth Cue Triple
