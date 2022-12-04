@@ -57,6 +57,7 @@ impl Cdc {
     ///
     /// If you want to emulate disc switching you should call `take_disc` and wait for at least a few
     /// hundred milliseconds of emulated time for the firmware to take note of the disc change.
+    #[allow(clippy::result_large_err)]
     pub fn set_disc(&mut self, disc: Option<Disc>) -> Result<(), (PsxError, Option<Disc>)> {
         if let (Some(old_disc), Some(new_disc)) = (&self.disc, &disc) {
             if old_disc.serial_number() != new_disc.serial_number() {

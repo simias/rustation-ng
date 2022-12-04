@@ -36,13 +36,13 @@ impl<T, const N: usize> ops::Deref for BoxArray<T, N> {
     type Target = [T; N];
 
     fn deref(&self) -> &Self::Target {
-        &*self.array
+        &self.array
     }
 }
 
 impl<T, const N: usize> ops::DerefMut for BoxArray<T, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.array
+        &mut self.array
     }
 }
 

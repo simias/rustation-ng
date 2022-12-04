@@ -355,23 +355,10 @@ impl Context {
     fn get_geometry(&self) -> libretro::GameGeometry {
         let upscaling = options::CoreOptions::internal_upscale_factor();
 
-        let full_vram = options::CoreOptions::display_full_vram();
+        let vram_display_mode = options::CoreOptions::display_full_vram();
 
-        let w;
-        let h;
-
-        let aspect_ratio = if full_vram {
-            w = 1024;
-            h = 512;
-            2. / 1.
-        } else {
-            // Maximum resolution supported by the PlayStation video output is 640x576. That high a
-            // vertical resolution would mean no blanking however, so it doesn't make a lot of
-            // sense.
-            w = 640;
-            h = 480;
-            4. / 3.
-        };
+        let (w, h) = vram_display_mode.max_resolution();
+        let aspect_ratio = vram_display_mode.aspect_ratio();
 
         let max_width = (w * upscaling) as libc::c_uint;
         let max_height = (h * upscaling) as libc::c_uint;
@@ -479,10 +466,10 @@ impl libretro::Context for Context {
     fn refresh_variables(&mut self) {
         self.analog_combo = options::CoreOptions::analog_combo();
 
-        let full_vram = options::CoreOptions::display_full_vram();
+        let vram_display_mode = options::CoreOptions::display_full_vram();
         self.psx
             .gpu
-            .set_rasterizer_option(RasterizerOption::DisplayFullVRam(full_vram));
+            .set_rasterizer_option(RasterizerOption::VRamDisplayMode(vram_display_mode));
 
         let force_transparency = options::CoreOptions::force_transparency();
         self.psx
@@ -667,7 +654,7 @@ fn try_bios<F>(predicate: F, path: &Path) -> Result<Bios>
 where
     F: Fn(&Metadata) -> bool,
 {
-    let mut file = File::open(&path)?;
+    let mut file = File::open(path)?;
 
     // Load the BIOS
     let mut rom = BoxArray::from_vec(vec![0; BIOS_SIZE]);
@@ -764,10 +751,48 @@ pub enum AnalogCombo {
     L3R3,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum VRamDisplayMode {
+    Native,
+    Full16bpp,
+    Full8bpp,
+    Full4bpp,
+}
+
+impl VRamDisplayMode {
+    fn max_resolution(self) -> (u32, u32) {
+        match self {
+            // Maximum resolution supported by the PlayStation video output is 640x576. That high a
+            // vertical resolution would mean no blanking however, so it doesn't make a lot of
+            // sense.
+            VRamDisplayMode::Native => (640, 480),
+            VRamDisplayMode::Full16bpp => (1024, 512),
+            VRamDisplayMode::Full8bpp => (2048, 512),
+            VRamDisplayMode::Full4bpp => (4096, 512),
+        }
+    }
+
+    fn aspect_ratio(self) -> f32 {
+        match self {
+            VRamDisplayMode::Native => 4. / 3.,
+            VRamDisplayMode::Full16bpp => 2. / 1.,
+            VRamDisplayMode::Full8bpp => 4. / 1.,
+            VRamDisplayMode::Full4bpp => 8. / 1.,
+        }
+    }
+}
+
+impl Default for VRamDisplayMode {
+    fn default() -> Self {
+        VRamDisplayMode::Native
+    }
+}
+
 mod options {
     //! Core options
 
-    use super::AnalogCombo;
+    use super::{AnalogCombo, VRamDisplayMode};
     use std::str::FromStr;
 
     #[derive(PartialEq, Eq)]
@@ -783,8 +808,8 @@ mod options {
                 => "Internal upscaling factor; 1x (native)";
             internal_color_depth: u8, parse_u8
                 => "Internal color depth; dithered 15bpp (native)|24bpp";
-            display_full_vram: bool, parse_bool
-                => "Display full VRAM; disabled|enabled";
+            display_full_vram: VRamDisplayMode, parse_full_vram
+                => "Display full VRAM; disabled|16bpp|8bpp|4bpp";
             force_transparency: bool, parse_bool
                 => "Force transparency for all draw commands; disabled|enabled";
             wireframe: WireframeMode, parse_wireframe
@@ -816,6 +841,18 @@ mod options {
             "false" | "disabled" | "off" => Ok(false),
             _ => Err(()),
         }
+    }
+
+    fn parse_full_vram(opt: &str) -> Result<VRamDisplayMode, ()> {
+        let mode = match opt {
+            "disabled" => VRamDisplayMode::Native,
+            "16bpp" => VRamDisplayMode::Full16bpp,
+            "8bpp" => VRamDisplayMode::Full8bpp,
+            "4bpp" => VRamDisplayMode::Full4bpp,
+            _ => return Err(()),
+        };
+
+        Ok(mode)
     }
 
     fn parse_analog_combo(opt: &str) -> Result<AnalogCombo, ()> {

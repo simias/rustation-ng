@@ -11,6 +11,7 @@ use crate::psx::gpu::commands::{NoShading, Position, Transparent};
 use crate::psx::gpu::commands::{NoTexture, Opaque, ShadingMode, TextureBlending, TextureRaw};
 use crate::psx::gpu::commands::{TextureMode, TransparencyMode};
 use crate::BoxArray;
+use crate::VRamDisplayMode;
 
 use crate::psx::gpu::{DisplayMode, DrawMode, MaskSettings, TextureWindow, TransparencyFunction};
 use fixed_point::{FpCoord, FpVar};
@@ -33,6 +34,7 @@ pub struct Rasterizer {
     vram: BoxArray<Pixel, VRAM_PIXELS>,
     state: State,
     /// Frame currently being drawn
+    #[serde(skip)]
     cur_frame: Frame,
     /// Left edge of the clipping area
     clip_x_min: i32,
@@ -51,7 +53,8 @@ pub struct Rasterizer {
     /// Texture mapping + caching
     tex_mapper: TextureMapper,
     /// If true we output the entire contents of the VRAM instead of just the visible portion
-    display_full_vram: bool,
+    #[serde(skip)]
+    vram_display_mode: VRamDisplayMode,
     /// Number of the first line displayed on the screen
     display_line_start: u16,
     /// Number of the first line *not* displayed on the screen
@@ -114,7 +117,7 @@ impl Rasterizer {
             draw_offset_y: 0,
             mask_settings: MaskSettings::new(),
             tex_mapper: TextureMapper::new(),
-            display_full_vram: false,
+            vram_display_mode: VRamDisplayMode::Native,
             display_line_start: 0x10,
             display_line_end: 0x100,
             display_column_start: 0x200,
@@ -301,7 +304,7 @@ impl Rasterizer {
 
     pub fn set_option(&mut self, opt: RasterizerOption) {
         match opt {
-            RasterizerOption::DisplayFullVRam(v) => self.display_full_vram = v,
+            RasterizerOption::VRamDisplayMode(v) => self.vram_display_mode = v,
             RasterizerOption::ForceTransparency(v) => self.force_transparency = v,
             RasterizerOption::Draw24Bpp(v) => {
                 if v != self.draw_24bpp {
@@ -320,7 +323,7 @@ impl Rasterizer {
 
     /// Called when we should output a line to the output buffer
     pub fn finish_line(&mut self, line: u16) {
-        if self.display_full_vram {
+        if self.vram_display_mode != VRamDisplayMode::Native {
             // We're just going to dump the full VRAM, nothing to do
             return;
         }
@@ -435,36 +438,64 @@ impl Rasterizer {
     fn new_frame(&mut self) -> Frame {
         let interlaced = self.display_mode.is_true_interlaced();
 
-        let (width, height) = if self.display_full_vram {
-            // If we display the full VRAM we don't output one line at a time in the GPU timing
-            // emulation code, we can just copy it fully here. It's not like there's any meaningful
-            // concept of "accuracy" in this mode anyway.
+        let (width, height) = match self.vram_display_mode {
+            VRamDisplayMode::Native => {
+                // XXX For now we approximate the dimensions of the visible area of the image.
+                // For better accuracy we should be emulating the output video timings more accurately
+                // but it's probably not worth it for now.
 
-            // It's possible for this to fail if `display_full_vram` was just activated and the
-            // current frame doesn't have the proper dimensions. In this case we're going to return
-            // a partially drawn leftover frame which is probably not too important.
-            if self.cur_frame.width == 1024 && self.cur_frame.height == 512 {
-                for i in 0..(1024 * 512) {
-                    self.cur_frame.pixels[i] = self.vram[i].to_rgb888();
+                let width = self.display_mode.xres();
+
+                let mut height = self.display_line_end - self.display_line_start;
+                if interlaced {
+                    height *= 2;
+                    // Last line of the bottom field isn't drawn
+                    height -= 1;
                 }
+
+                (width as u32, height as u32)
             }
+            mode => {
+                let (w, h) = mode.max_resolution();
+                // If we display the full VRAM we don't output one line at a time in the GPU timing
+                // emulation code, we can just copy it fully here. It's not like there's any meaningful
+                // concept of "accuracy" in this mode anyway.
 
-            (1024, 512)
-        } else {
-            // XXX For now we approximate the dimensions of the visible area of the image.
-            // For better accuracy we should be emulating the output video timings more accurately
-            // but it's probably not worth it for now.
+                // It's possible for this to fail if `vram_display_mode` was just switched and the
+                // current frame doesn't have the proper dimensions. In this case we're going to return
+                // a partially drawn leftover frame which is probably not too important.
+                if self.cur_frame.width >= w && self.cur_frame.height >= h {
+                    for i in 0..((w * h) as usize) {
+                        self.cur_frame.pixels[i] = match mode {
+                            VRamDisplayMode::Native => unreachable!(),
+                            VRamDisplayMode::Full16bpp => self.vram[i].to_rgb888(),
+                            VRamDisplayMode::Full8bpp => {
+                                let p = self.vram[i >> 1].vram_bytes();
 
-            let width = self.display_mode.xres();
+                                let g = p[i & 1];
 
-            let mut height = self.display_line_end - self.display_line_start;
-            if interlaced {
-                height *= 2;
-                // Last line of the bottom field isn't drawn
-                height -= 1;
+                                Pixel::from_rgb(g, g, g).0
+                            }
+                            VRamDisplayMode::Full4bpp => {
+                                let p = self.vram[i >> 2].to_mbgr1555();
+                                let n = [
+                                    (p & 0xf) as u8,
+                                    ((p >> 4) & 0xf) as u8,
+                                    ((p >> 8) & 0xf) as u8,
+                                    ((p >> 12) & 0xf) as u8,
+                                ];
+
+                                let g = n[i & 2];
+                                let g = g | g << 4;
+
+                                Pixel::from_rgb(g, g, g).0
+                            }
+                        };
+                    }
+                }
+
+                (w, h)
             }
-
-            (width as u32, height as u32)
         };
 
         if width == self.cur_frame.width && height == self.cur_frame.height {
@@ -1822,6 +1853,11 @@ impl Pixel {
 
     pub fn set_mask(&mut self) {
         self.0 |= 1 << 24;
+    }
+
+    // Returns the 16bpp color as two bytes)
+    pub fn vram_bytes(self) -> [u8; 2] {
+        self.to_mbgr1555().to_le_bytes()
     }
 
     /// Blend `self` (the foreground pixel) and `bg_pixel` using the provided transparency mode

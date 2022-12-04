@@ -13,7 +13,7 @@ impl Bios {
     /// Create a BIOS image from `binary` and attempt to match it with an entry in the database. If
     /// no match can be found return an error.
     pub fn new(binary: BoxArray<u8, BIOS_SIZE>) -> Result<Bios> {
-        match db::lookup_blob(&*binary) {
+        match db::lookup_blob(&binary) {
             Some(metadata) => Ok(Bios {
                 rom: binary,
                 metadata,

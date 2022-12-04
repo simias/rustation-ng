@@ -235,7 +235,7 @@ impl Command {
 
 #[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RasterizerOption {
-    DisplayFullVRam(bool),
+    VRamDisplayMode(crate::VRamDisplayMode),
     ForceTransparency(bool),
     Draw24Bpp(bool),
     DitherForceDisable(bool),
@@ -244,7 +244,7 @@ pub enum RasterizerOption {
 }
 
 /// Buffer containing one rendered frame
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct Frame {
     /// Frame pixels in xRGB 8888 format. Its size must always be *exactly* `width * height`.
     pub pixels: Vec<u32>,
