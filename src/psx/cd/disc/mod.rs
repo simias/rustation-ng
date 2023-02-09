@@ -223,10 +223,14 @@ pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
 fn extract_serial_number(image: &mut CdCache) -> Result<SerialNumber> {
     let system_cnf = read_system_cnf(image)?;
 
+    parse_serial_number_from_system_cnf(&system_cnf)
+}
+
+fn parse_serial_number_from_system_cnf(system_cnf: &[u8]) -> Result<SerialNumber> {
     // Now we need to parse the SYSTEM.CNF file to get the content of the "BOOT" line
     let mut boot_path = None;
 
-    for line in system_cnf.split(|&b| b == b'\n') {
+    for line in system_cnf.split(|&b| b == b'\n' || b == b'\r') {
         let words: Vec<_> = line
             .split(|&b| b == b' ' || b == b'\t' || b == b'=')
             .filter(|w| !w.is_empty())
@@ -247,19 +251,15 @@ fn extract_serial_number(image: &mut CdCache) -> Result<SerialNumber> {
     };
 
     // boot_path should look like "cdrom:\FOO\BAR\...\aaaa_ddd.dd;1"
-    let path: Vec<_> = boot_path
-        .split(|&b| b == b':' || b == b';' || b == b'\\')
-        .collect();
+    //
+    // Most (but not all) paths ends with a ";1", so get rid of it here
+    let boot_path = boot_path.split(|&b| b == b';').next().unwrap();
 
-    if path.len() < 2 {
-        warn!(
-            "Unexpected boot path: {}",
-            String::from_utf8_lossy(boot_path)
-        );
-        return Err(PsxError::NoSerialNumber);
-    }
-
-    let bin_name = path[path.len() - 2];
+    // boot_path should look like "cdrom:\FOO\BAR\...\aaaa_ddd.dd"
+    let bin_name = boot_path
+        .split(|&b| b == b':' || b == b'\\')
+        .last()
+        .unwrap();
 
     let serial = SerialNumber::from_bin_name(bin_name);
 
@@ -302,6 +302,42 @@ impl Image for DummyImage {
     }
 
     fn toc(&self) -> &Toc {
-        unimplemented!("Attempted to read the ToC of a placeholder disc image")
+        unimplemented!("Attempted to read the ToC of a placeholder disc image");
     }
+}
+
+#[test]
+fn parse_sn() {
+    fn tst(conf: &[u8], expected: SerialNumber) {
+        assert_eq!(parse_serial_number_from_system_cnf(conf).unwrap(), expected);
+    }
+
+    // Final Fantasy Tactics (Japan) (Rev 1)
+    tst(
+        br#"BOOT = cdrom:\SLPS_007.70;1
+TCB = 4
+EVENT = 16
+STACK = 801fff00
+"#,
+        SerialNumber(*b"SLPS-00770"),
+    );
+
+    // Legaia Densetsu (Japan)
+    tst(
+        br#"BOOT= cdrom:\SCPS_100.59
+TCB= 4
+EVENT= 10
+STACK= 801FFFFC
+        "#,
+        SerialNumber(*b"SCPS-10059"),
+    );
+
+    // Final Fantasy IX (USA) (Disc 1) (Rev 1)
+    tst(
+        br#"BOOT=cdrom:\SLUS_012.51;1
+TCB=4
+EVENT=16
+STACK=801fff00"#,
+        SerialNumber(*b"SLUS-01251"),
+    );
 }
