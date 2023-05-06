@@ -97,6 +97,8 @@ struct Context {
     internal_height: u32,
     /// Button combination used to control the analog button
     analog_combo: AnalogCombo,
+    /// Ratio to match the analog deadzone of the emulator's controller to that of a real DualShock
+    analog_compensation: f32,
 }
 
 impl Context {
@@ -113,6 +115,7 @@ impl Context {
             internal_width: 640,
             internal_height: 480,
             analog_combo: AnalogCombo::SelectR3,
+            analog_compensation: 1.,
         };
 
         libretro::Context::refresh_variables(&mut ctx);
@@ -182,6 +185,7 @@ impl Context {
                     AnalogCombo::SelectL3 => select_pressed && l3_pressed,
                     AnalogCombo::L3R3 => l3_pressed && r3_pressed,
                 };
+
                 device.set_button_state(
                     Button::Analog,
                     if analog_pressed {
@@ -191,26 +195,40 @@ impl Context {
                     },
                 );
 
-                let left_x = libretro::axis_state(
+                let comp = self.analog_compensation;
+
+                let compensate = |v: i16| {
+                    let v = f32::from(v) * comp;
+
+                    if v > f32::from(i16::MAX) {
+                        i16::MAX
+                    } else if v < f32::from(i16::MIN) {
+                        i16::MIN
+                    } else {
+                        v as i16
+                    }
+                };
+
+                let left_x = compensate(libretro::axis_state(
                     port,
                     libretro::AnalogInput::Left,
                     libretro::AnalogAxis::X,
-                );
-                let left_y = libretro::axis_state(
+                ));
+                let left_y = compensate(libretro::axis_state(
                     port,
                     libretro::AnalogInput::Left,
                     libretro::AnalogAxis::Y,
-                );
-                let right_x = libretro::axis_state(
+                ));
+                let right_x = compensate(libretro::axis_state(
                     port,
                     libretro::AnalogInput::Right,
                     libretro::AnalogAxis::X,
-                );
-                let right_y = libretro::axis_state(
+                ));
+                let right_y = compensate(libretro::axis_state(
                     port,
                     libretro::AnalogInput::Right,
                     libretro::AnalogAxis::Y,
-                );
+                ));
 
                 device.set_axis_state((left_x, left_y), (right_x, right_y));
 
@@ -466,6 +484,7 @@ impl libretro::Context for Context {
 
     fn refresh_variables(&mut self) {
         self.analog_combo = options::CoreOptions::analog_combo();
+        self.analog_compensation = options::CoreOptions::analog_compensation();
 
         let vram_display_mode = options::CoreOptions::display_full_vram();
         self.psx
@@ -814,12 +833,23 @@ mod options {
             analog_combo: AnalogCombo, parse_analog_combo
                 => "Analog toggle button combo; \
                 Select + R3|Select + L3|L3 + R3";
+            analog_compensation: f32, parse_percent
+                => "Analog deadzone compensation; \
+                100%|105%|110%|115%|120%|130%|150%|50%|70%|80%|85%|90%|95%";
         });
 
     fn parse_upscale(opt: &str) -> Result<u32, <u32 as FromStr>::Err> {
         let num = opt.trim_matches(|c: char| !c.is_numeric());
 
         num.parse()
+    }
+
+    fn parse_percent(opt: &str) -> Result<f32, <u32 as FromStr>::Err> {
+        let num = opt.trim_matches(|c: char| !c.is_numeric());
+
+        let percent: u32 = num.parse()?;
+
+        Ok((percent as f32) / 100.)
     }
 
     fn parse_u8(opt: &str) -> Result<u8, <u8 as FromStr>::Err> {
