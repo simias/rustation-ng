@@ -48,7 +48,7 @@ impl Cache {
     }
 
     fn reader(&self) -> (MutexGuard<Reader>, &Condvar) {
-        let &(ref reader, ref cond) = &*self.reader;
+        let (reader, cond) = &*self.reader;
 
         (reader.lock().unwrap(), cond)
     }
@@ -123,7 +123,7 @@ impl Reader {
 }
 
 fn run_prefetcher(mut image: Box<dyn Image>, reader: Arc<(Mutex<Reader>, Condvar)>) {
-    let &(ref reader_mutex, ref cond) = &*reader;
+    let (reader_mutex, cond) = &*reader;
 
     let mut reader = reader_mutex.lock().unwrap();
 

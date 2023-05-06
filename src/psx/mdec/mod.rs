@@ -567,7 +567,7 @@ pub fn dma_load(psx: &mut Psx) -> (u32, u32) {
     // Run to keep feeding the output FIFO if we still have data
     run(psx);
 
-    (v, (offset as u32) << 2)
+    (v, offset << 2)
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
@@ -726,13 +726,13 @@ impl Index<usize> for IdctMatrix {
     type Output = i16;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.matrix[index as usize]
+        &self.matrix[index]
     }
 }
 
 impl IndexMut<usize> for IdctMatrix {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.matrix[index as usize]
+        &mut self.matrix[index]
     }
 }
 
@@ -841,13 +841,13 @@ impl Index<usize> for Macroblock {
     type Output = i8;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.block[index as usize]
+        &self.block[index]
     }
 }
 
 impl IndexMut<usize> for Macroblock {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.block[index as usize]
+        &mut self.block[index]
     }
 }
 /// Coefficients during macroblock decoding
@@ -891,13 +891,13 @@ impl Index<usize> for MacroblockCoeffs {
     type Output = i16;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.coeffs[index as usize]
+        &self.coeffs[index]
     }
 }
 
 impl IndexMut<usize> for MacroblockCoeffs {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.coeffs[index as usize]
+        &mut self.coeffs[index]
     }
 }
 

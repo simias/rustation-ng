@@ -659,16 +659,16 @@ pub fn serial_latch(cdc: &mut Cdc) {
                         let addr2 = (cmd >> 10) & 0x3f;
 
                         match addr2 {
-                            0b0000_00..=0b0100_11 => {
+                            0b000000..=0b010011 => {
                                 cdc_debug!(
                                     "Write K{:02X} = 0x{:02x}",
                                     (cmd >> 8) & 0xff,
                                     cmd & 0xff
                                 )
                             }
-                            0b1111_00 => cdc_debug!("TRVSC data: 0x{:03x}", cmd & 0x3ff),
+                            0b111100 => cdc_debug!("TRVSC data: 0x{:03x}", cmd & 0x3ff),
                             // Focus BIAS data
-                            0b1111_01 => {
+                            0b111101 => {
                                 // Sign extend and mask bit 0 which is not used according to the
                                 // docs, not that it makes a huge difference for us here.
                                 let focus_bias = (cmd << 6) as i16;

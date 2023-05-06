@@ -751,9 +751,10 @@ pub enum AnalogCombo {
     L3R3,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug, Default)]
 #[repr(u8)]
 pub enum VRamDisplayMode {
+    #[default]
     Native,
     Full16bpp,
     Full8bpp,
@@ -780,12 +781,6 @@ impl VRamDisplayMode {
             VRamDisplayMode::Full8bpp => 4. / 1.,
             VRamDisplayMode::Full4bpp => 8. / 1.,
         }
-    }
-}
-
-impl Default for VRamDisplayMode {
-    fn default() -> Self {
-        VRamDisplayMode::Native
     }
 }
 
