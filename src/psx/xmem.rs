@@ -5,9 +5,8 @@ use super::bios::BIOS_SIZE;
 use super::{cpu, AccessWidth, Addressable};
 use crate::box_array::BoxArray;
 use crate::error::{PsxError, Result};
+use crate::sha::sha256;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use shaman::digest::Digest;
-use shaman::sha2::Sha256;
 
 /// This structure manages all executable portions of memory and offers fast lookup to speed up
 /// instruction fetches.
@@ -79,9 +78,7 @@ impl XMemory {
         }
 
         // Update bios_sha256
-        let mut hasher = Sha256::new();
-        hasher.input(bios);
-        hasher.result(&mut self.bios_sha256);
+        self.bios_sha256 = sha256(bios);
     }
 
     /// Copy the BIOS from another XMemory instance, returning an error if the checksums differ

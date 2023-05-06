@@ -37,7 +37,7 @@ extern crate flexbuffers;
 extern crate fnv;
 extern crate serde;
 extern crate serde_big_array;
-extern crate shaman;
+extern crate sha as sha_backend;
 extern crate thiserror;
 
 mod assembler;
@@ -51,7 +51,9 @@ pub mod libretro;
 mod debugger;
 mod psx;
 mod retrolog;
+mod sha;
 
+use crate::sha::sha256;
 use box_array::BoxArray;
 use cdimage::cue::Cue;
 use error::{PsxError, Result};
@@ -63,7 +65,6 @@ use psx::gpu::RasterizerOption;
 use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock};
 use psx::pad_memcard::devices::{DeviceInterface, DisconnectedDevice};
 use psx::{CDC_ROM_SHA256, CDC_ROM_SIZE};
-use shaman::{digest::Digest, sha2::Sha256};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -706,12 +707,9 @@ fn find_cdc_firmware() -> Result<[u8; CDC_ROM_SIZE]> {
 
                             file.read_exact(&mut rom)?;
 
-                            let mut hasher = Sha256::new();
-                            hasher.input(&rom);
-                            let mut sha256 = [0; 32];
-                            hasher.result(&mut sha256);
+                            let sha = sha256(&rom);
 
-                            if sha256 != CDC_ROM_SHA256 {
+                            if sha != CDC_ROM_SHA256 {
                                 warn!("Ignoring {:?}: invalid SHA256", path);
                             } else {
                                 info!("Using CDC firmware {:?}", path);

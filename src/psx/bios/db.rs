@@ -2,12 +2,10 @@
 
 use std::fmt;
 
-use shaman::digest::Digest;
-use shaman::sha2::Sha256;
-
 use crate::assembler::syntax::*;
 use crate::assembler::Assembler;
 use crate::psx::cd::disc::Region;
+use crate::sha::sha256;
 
 use super::{Bios, BIOS_SIZE};
 
@@ -49,21 +47,13 @@ impl fmt::Debug for Metadata {
 /// Attempt to find the metadata for the given BIOS binary blob.  Returns None if this BIOS is not
 /// part of the database.
 pub fn lookup_blob(binary: &[u8; BIOS_SIZE]) -> Option<&'static Metadata> {
-    let mut hasher = Sha256::new();
-
-    hasher.input(binary);
-
-    let mut sha256 = [0; 32];
-
-    hasher.result(&mut sha256);
-
-    lookup_sha256(&sha256)
+    lookup_sha256(sha256(binary))
 }
 
 /// Attempt to find the metadata for the given BIOS SHA-256 hash. Returns None if this BIOS is not
 /// part of the database.
-pub fn lookup_sha256(sha256: &[u8; 32]) -> Option<&'static Metadata> {
-    DATABASE.iter().find(|md| md.sha256 == *sha256)
+pub fn lookup_sha256(sha256: [u8; 32]) -> Option<&'static Metadata> {
+    DATABASE.iter().find(|md| md.sha256 == sha256)
 }
 
 pub static DATABASE: [Metadata; 24] = [

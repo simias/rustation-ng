@@ -6,9 +6,9 @@ pub mod iso9660;
 
 use super::{irq, Addressable, Psx};
 use crate::error::{PsxError, Result};
+use crate::sha::sha256;
 pub use cdc::MC68HC05_ROM_DUMP_SIZE as CDC_ROM_SIZE;
 use disc::Disc;
-use shaman::{digest::Digest, sha2::Sha256};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct CdInterface {
@@ -26,15 +26,9 @@ impl CdInterface {
             // revisions of the PSX hardware (a PSOne firmware almost certainly wouldn't work
             // without tweaks for instance). As such for now I only support one single ROM from the
             // SCPH-5502 (PAL) hardware and patch it below for other regions.
-            let mut hasher = Sha256::new();
+            let sha = sha256(&cdc_rom);
 
-            hasher.input(&cdc_rom);
-
-            let mut sha256 = [0; 32];
-
-            hasher.result(&mut sha256);
-
-            if sha256 != CDC_ROM_SHA256 {
+            if sha != CDC_ROM_SHA256 {
                 return Err(PsxError::BadCdcFirmware);
             }
         }
