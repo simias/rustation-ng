@@ -534,8 +534,9 @@ impl libretro::Context for Context {
 
     fn reset(&mut self) {
         match Context::load_disc(&self.disc_path) {
-            Ok(psx) => {
+            Ok(mut psx) => {
                 info!("Game reset");
+                std::mem::swap(&mut self.psx.pad_memcard, &mut psx.pad_memcard);
                 self.psx = psx;
             }
             Err(_) => warn!("Couldn't reset game"),
