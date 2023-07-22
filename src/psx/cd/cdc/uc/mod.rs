@@ -366,7 +366,7 @@ impl Uc {
 
     /// Called by the DSP to set the value of the SCOR input
     pub fn set_dsp_scor(&mut self, scor: bool) {
-        let mut port_c = &mut self.io_ports[2];
+        let port_c = &mut self.io_ports[2];
 
         // Connected to port C pin 7
         let prev_scor = port_c.load() & (1 << 7) != 0;
