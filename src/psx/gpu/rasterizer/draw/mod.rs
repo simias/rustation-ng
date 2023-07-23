@@ -2040,6 +2040,11 @@ where
         vertex.position.x += rasterizer.draw_offset_x;
         vertex.position.y += rasterizer.draw_offset_y;
 
+        // XXX Not sure if that's correct, Mednafen does it differently, but it does fix the
+        // flickering on FFVIII's Dollet bridge
+        vertex.position.x = extend_to_i32(vertex.position.x as u32, 11);
+        vertex.position.y = extend_to_i32(vertex.position.y as u32, 11);
+
         if Texture::is_textured() {
             if v == 0 {
                 clut = params[index];
@@ -2126,6 +2131,11 @@ where
         vertex.position.x += rasterizer.draw_offset_x;
         vertex.position.y += rasterizer.draw_offset_y;
 
+        // XXX Not sure if that's correct, Mednafen does it differently, but it does fix the
+        // flickering on FFVIII's Dollet bridge
+        vertex.position.x = extend_to_i32(vertex.position.x as u32, 11);
+        vertex.position.y = extend_to_i32(vertex.position.y as u32, 11);
+
         if Texture::is_textured() {
             if v == 0 {
                 clut = params[index];
@@ -2181,6 +2191,11 @@ fn cmd_handle_rect<Transparency, Texture>(
     // Add the draw offset
     origin.position.x += rasterizer.draw_offset_x;
     origin.position.y += rasterizer.draw_offset_y;
+
+    // Without this we get some flickering on the bridge in Dollet in FFVIII because the coords
+    // become negative. I wonder if that's the best way to do it though.
+    origin.position.x = extend_to_i32(origin.position.x as u32, 11);
+    origin.position.y = extend_to_i32(origin.position.y as u32, 11);
 
     if Texture::is_textured() {
         rasterizer.set_clut(params[index]);

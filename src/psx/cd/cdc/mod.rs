@@ -225,7 +225,7 @@ impl Cdc {
     }
 }
 
-/// Convert a microseconds to a number of 44.1kHz audio cycles with rounding
+/// Convert a delay in microseconds into a number of 44.1kHz audio cycles with rounding
 const fn us_to_audio_cycles(us: u32) -> u32 {
     let us = us as u64;
 
