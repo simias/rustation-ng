@@ -65,6 +65,7 @@ use psx::gpu::RasterizerOption;
 use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock};
 use psx::pad_memcard::devices::{DeviceInterface, DisconnectedDevice};
 use psx::{CDC_ROM_SHA256, CDC_ROM_SIZE};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -78,7 +79,7 @@ mod version {
 const SYSTEM_INFO: libretro::SystemInfo = libretro::SystemInfo {
     library_name: cstring!("rustation-ng"),
     library_version: version::VERSION_CSTR as *const _ as *const libc::c_char,
-    valid_extensions: cstring!("cue,zip"),
+    valid_extensions: cstring!("cue|zip"),
     need_fullpath: true,
     block_extract: true,
 };
@@ -86,7 +87,10 @@ const SYSTEM_INFO: libretro::SystemInfo = libretro::SystemInfo {
 /// Emulation context containing the emulator state
 struct Context {
     psx: Box<psx::Psx>,
-    disc_path: PathBuf,
+    /// All disc images this emulator instance knows about
+    images: Vec<DiscImage>,
+    /// Index of the currently selected image in `images`
+    cur_image: usize,
     /// The type of controller connected on the two input ports
     controller_type: [libretro::InputDevice; 2],
     /// Objects used to deal with reading/storing the memory card images to files
@@ -103,11 +107,13 @@ struct Context {
 
 impl Context {
     fn new(disc: &Path) -> Result<Context> {
-        let psx = Context::load_disc(disc)?;
+        let image = DiscImage::new(disc);
+        let psx = Context::load_disc(&image)?;
 
         let mut ctx = Context {
             psx,
-            disc_path: disc.to_path_buf(),
+            images: vec![image],
+            cur_image: 0,
             // Start with both port disconnected and wait for the frontend to tell us what to use
             // in `set_controller`
             controller_type: [libretro::InputDevice::None; 2],
@@ -136,6 +142,10 @@ impl Context {
         }
 
         Ok(ctx)
+    }
+
+    fn cur_image(&self) -> &DiscImage {
+        self.images.get(self.cur_image).expect("Invalid cur_image!")
     }
 
     fn poll_controllers(&mut self) {
@@ -246,20 +256,29 @@ impl Context {
         }
     }
 
-    fn load_disc(disc: &Path) -> Result<Box<psx::Psx>> {
-        let image = if disc.extension().and_then(|ext| ext.to_str()) == Some("cue") {
-            Cue::new(disc)
+    fn load_image(image: &DiscImage) -> Result<Disc> {
+        let path = image.path();
+
+        let disc = if path.extension().and_then(|ext| ext.to_str()) == Some("cue") {
+            Cue::new(path)
         } else {
-            Cue::new_from_zip(disc)
+            Cue::new_from_zip(path)
         }?;
 
-        let disc = Disc::new(Box::new(image))?;
+        let disc = Disc::new(Box::new(disc))?;
 
         let serial = disc.serial_number();
         let region = disc.region();
 
         info!("Disc serial number: {}", serial);
         info!("Detected disc region: {:?}", region);
+
+        Ok(disc)
+    }
+
+    fn load_disc(image: &DiscImage) -> Result<Box<psx::Psx>> {
+        let disc = Context::load_image(image)?;
+        let region = disc.region();
 
         let bios = find_bios(|md| md.region == region)?;
 
@@ -270,12 +289,10 @@ impl Context {
         Ok(psx)
     }
 
-    /// Initialize the memory cards connected to the emulated console
-    fn setup_memory_cards(&mut self) {
+    /// Disconnect any configured Memory Card
+    fn disconnect_memory_cards(&mut self) {
         let mut memory_cards = self.psx.pad_memcard.memory_cards_mut();
 
-        // Start by disconnecting everything to make sure we never half-configure the memory card.
-        // We want to make it hard for the user to lose their saves...
         for m in &mut memory_cards {
             let device = Box::new(DisconnectedDevice);
             m.connect_device(device);
@@ -283,6 +300,13 @@ impl Context {
         for m in self.memcard_files.iter_mut() {
             *m = MemoryCardFile::dummy();
         }
+    }
+
+    /// Initialize the memory cards connected to the emulated console
+    fn setup_memory_cards(&mut self) {
+        // Start by disconnecting everything to make sure we never half-configure the memory card.
+        // We want to make it hard for the user to lose their saves...
+        self.disconnect_memory_cards();
 
         let save_path = match libretro::get_save_directory() {
             Some(p) => p,
@@ -295,38 +319,36 @@ impl Context {
         // Memory Card 1: game specific
         //
         // XXX Make this configurable at some point.
-        let mc1_filename = self.disc_path.file_stem().map(|f| {
-            let p: &Path = f.as_ref();
-            p.with_extension("0.mcr")
-        });
+        let mc1_filename = {
+            let p: &Path = self.cur_image().basename().as_ref();
+            let p = p.with_extension("0.mcr");
 
-        match mc1_filename {
-            Some(f) => {
-                let full_path = save_path.join(f);
-                match MemoryCardFile::load_or_create(&full_path) {
-                    Ok((mcf, mc)) => {
-                        // Success
-                        info!("Memory Card 1 is {}", mcf.path().display());
-                        memory_cards[0].connect_device(Box::new(mc));
-                        self.memcard_files[0] = mcf;
-                    }
-                    Err(e) => {
-                        error!(
-                            "Can't load or create memory card '{}': {}",
-                            full_path.display(),
-                            e
-                        );
-                    }
-                }
-            }
-            None => error!("Can't generate a file name for memory card 1, disabling it"),
-        }
-
+            save_path.join(p)
+        };
         // Memory Card 2: same for all games
         //
         // XXX Make this configurable at some point.
-        let full_path = save_path.join("rustation_common.1.mcr");
-        match MemoryCardFile::load_or_create(&full_path) {
+        let mc2_filename = save_path.join("rustation_common.1.mcr");
+
+        let memory_cards = self.psx.pad_memcard.memory_cards_mut();
+
+        match MemoryCardFile::load_or_create(&mc1_filename) {
+            Ok((mcf, mc)) => {
+                // Success
+                info!("Memory Card 1 is {}", mcf.path().display());
+                memory_cards[0].connect_device(Box::new(mc));
+                self.memcard_files[0] = mcf;
+            }
+            Err(e) => {
+                error!(
+                    "Can't load or create memory card '{}': {}",
+                    mc1_filename.display(),
+                    e
+                );
+            }
+        }
+
+        match MemoryCardFile::load_or_create(&mc2_filename) {
             Ok((mcf, mc)) => {
                 // Success
                 info!("Memory Card 2 is {}", mcf.path().display());
@@ -336,7 +358,7 @@ impl Context {
             Err(e) => {
                 error!(
                     "Can't load or create memory card '{}': {}",
-                    full_path.display(),
+                    mc2_filename.display(),
                     e
                 );
             }
@@ -533,7 +555,7 @@ impl libretro::Context for Context {
     }
 
     fn reset(&mut self) {
-        match Context::load_disc(&self.disc_path) {
+        match Context::load_disc(self.cur_image()) {
             Ok(mut psx) => {
                 info!("Game reset");
                 std::mem::swap(&mut self.psx.pad_memcard, &mut psx.pad_memcard);
@@ -619,6 +641,99 @@ impl libretro::Context for Context {
         };
 
         libretro::Context::refresh_variables(self);
+
+        Ok(())
+    }
+
+    fn get_num_images(&self) -> usize {
+        self.images.len()
+    }
+
+    fn get_image_index(&self) -> usize {
+        self.cur_image
+    }
+
+    fn get_image_path(&self, index: usize) -> Option<&Path> {
+        self.images.get(index).map(|d| d.path())
+    }
+
+    fn is_disc_ejected(&self) -> bool {
+        !self.psx.cd.disc_present()
+    }
+
+    fn eject_disc(&mut self) -> ::std::result::Result<(), ()> {
+        self.psx.cd.eject_disc();
+
+        Ok(())
+    }
+
+    fn insert_disc(&mut self) -> ::std::result::Result<(), ()> {
+        let disc = match Context::load_image(self.cur_image()) {
+            Ok(disc) => disc,
+            Err(e) => {
+                error!("Couldn't load {:?}: {}", self.cur_image().path(), e);
+                return Err(());
+            }
+        };
+
+        // Swap the memory cards if necessary since they depend on the disc name
+        self.setup_memory_cards();
+
+        self.psx.cd.load_disc(disc);
+
+        Ok(())
+    }
+
+    fn set_image_index(&mut self, index: usize) -> ::std::result::Result<(), ()> {
+        if index >= self.get_num_images() {
+            // The libretro spec says that this can mean that we want to load no disc, but for us
+            // there's not really any difference between no disc loaded and disc ejected, so I'm
+            // not sure if it's worth handling this case
+            error!("Ignoring set_image_index with an index out of range");
+            return Err(());
+        }
+
+        if !self.is_disc_ejected() && index != self.cur_image {
+            error!("Refusing to change the image index while the CD is not ejected");
+            return Err(());
+        }
+
+        self.cur_image = index;
+
+        Ok(())
+    }
+
+    fn get_image_label(&self, index: usize) -> Option<String> {
+        self.images
+            .get(index)
+            .map(|img| img.basename().to_string_lossy().into_owned())
+    }
+
+    fn add_image_index(&mut self) -> ::std::result::Result<(), ()> {
+        // Since we don't know what the new image will be at this point I just create a dummy entry
+        let new = match self.images.first() {
+            Some(i) => i.clone(),
+            None => DiscImage::new(""),
+        };
+
+        self.images.push(new);
+
+        Ok(())
+    }
+
+    fn replace_image_index(&mut self, index: usize, path: &Path) -> ::std::result::Result<(), ()> {
+        if index == self.cur_image && !self.is_disc_ejected() {
+            error!("Can't replace the image of the currently loaded disc!");
+            return Err(());
+        }
+
+        match self.images.get_mut(index) {
+            Some(i) => *i = DiscImage::new(path),
+            None => {
+                error!("Image index {} out of range", index);
+                return Err(());
+            }
+        }
 
         Ok(())
     }
@@ -924,6 +1039,28 @@ fn load_game(disc: PathBuf) -> Option<Box<dyn libretro::Context>> {
             error!("Couldn't build context: {}", e);
             None
         }
+    }
+}
+
+/// A loadable disc image stored somewhere on disc
+#[derive(Clone)]
+struct DiscImage {
+    path: PathBuf,
+}
+
+impl DiscImage {
+    fn new<P: AsRef<Path>>(path: P) -> DiscImage {
+        let path = path.as_ref().to_path_buf();
+
+        DiscImage { path }
+    }
+
+    fn path(&self) -> &Path {
+        self.path.as_ref()
+    }
+
+    fn basename(&self) -> &OsStr {
+        self.path.file_stem().expect("Couldn't get disc image stem")
     }
 }
 

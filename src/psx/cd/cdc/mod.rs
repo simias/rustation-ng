@@ -17,6 +17,10 @@ pub struct Cdc {
     dsp: dsp::Dsp,
     disc: Option<Disc>,
     loading_speed: u8,
+    /// Number of audio cycles used to delay the shell closing event when switching disc. It's important to wait
+    /// a little to make sure that the controller has the time to register the disc switch.
+    #[serde(default)]
+    shell_close_delay: Option<u32>,
 }
 
 impl Cdc {
@@ -29,6 +33,7 @@ impl Cdc {
             dsp: dsp::Dsp::new(region),
             disc,
             loading_speed: 2,
+            shell_close_delay: None,
         };
 
         // I start with the sled at some location on the disc to simulate the case where the
@@ -48,6 +53,7 @@ impl Cdc {
     /// Remove the disc and emulate an open tray
     pub fn take_disc(&mut self) -> Option<Disc> {
         self.set_shell_open(true);
+        self.dsp.disc_removed();
 
         self.disc.take()
     }
@@ -55,8 +61,10 @@ impl Cdc {
     /// Attempt to load a disc. If a `disc` is `Some` and disc is already loaded and its serial
     /// number is different from the new one, generate an error (used for savestate loading).
     ///
-    /// If you want to emulate disc switching you should call `take_disc` and wait for at least a few
-    /// hundred milliseconds of emulated time for the firmware to take note of the disc change.
+    /// This function is meant as a helper for savestate loading.
+    ///
+    /// If you want to emulate disc switching you should call `load_disc` instead so that the shell
+    /// open/shell close sequence timings are handled correctly.
     #[allow(clippy::result_large_err)]
     pub fn set_disc(&mut self, disc: Option<Disc>) -> Result<(), (PsxError, Option<Disc>)> {
         if let (Some(old_disc), Some(new_disc)) = (&self.disc, &disc) {
@@ -73,13 +81,30 @@ impl Cdc {
 
         self.disc = disc;
 
-        self.set_shell_open(self.disc.is_none());
+        if self.shell_close_delay.is_some() {
+            // We were in the middle of a disc switch, wait until we close the shell
+            self.set_shell_open(true);
+            if self.disc.is_none() {
+                self.shell_close_delay = None;
+            }
+        } else {
+            self.set_shell_open(self.disc.is_none());
+        }
 
         Ok(())
     }
 
     pub fn disc_present(&self) -> bool {
         self.disc.is_some()
+    }
+
+    pub fn load_disc(&mut self, disc: Disc) {
+        // Make sure any previous disc is gone
+        self.take_disc();
+
+        self.disc = Some(disc);
+        // Wait half a second before closing the shell
+        self.shell_close_delay = Some(us_to_audio_cycles(500_000));
     }
 
     pub fn set_cd_loading_speed(&mut self, loading_speed: u8) {
@@ -109,6 +134,16 @@ impl Cdc {
             // No overclocking requested
             1
         };
+
+        match self.shell_close_delay {
+            None => (),
+            Some(c) if c <= u32::from(cycles_to_run) => {
+                info!("Closing CD shell");
+                self.set_shell_open(self.disc.is_none());
+                self.shell_close_delay = None;
+            }
+            Some(ref mut c) => *c -= u32::from(cycles_to_run),
+        }
 
         for _ in 0..cycles_to_run {
             uc::run_audio_cycle(self);

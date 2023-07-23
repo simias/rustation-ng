@@ -11,7 +11,7 @@
 use libc::{c_char, c_double, c_float, c_uint, c_void, size_t};
 use std::ffi::{CStr, CString};
 use std::marker::Sync;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 #[allow(clippy::result_unit_err)]
@@ -36,6 +36,28 @@ pub trait Context {
     fn serialize(&mut self, data: &mut [u8]) -> Result<(), ()>;
     /// Deserialize the savestate from the provided buffer
     fn unserialize(&mut self, data: &[u8]) -> Result<(), ()>;
+    /// Get the number of disc images in the queue
+    fn get_num_images(&self) -> usize;
+    /// Get the index of the currently loaded image
+    fn get_image_index(&self) -> usize;
+    /// Set the index of the currently loaded image. Does not actually load the image, that will
+    /// only occur when `insert_disc` is called.
+    fn set_image_index(&mut self, index: usize) -> Result<(), ()>;
+    /// Get the path of the image at position `index`
+    fn get_image_path(&self, index: usize) -> Option<&Path>;
+    /// Get the label of the image at position `index`. The label is just a string identifying the
+    /// disc, such as the filename or something similar.
+    fn get_image_label(&self, index: usize) -> Option<String>;
+    /// Returns true if the disc is currently ejected
+    fn is_disc_ejected(&self) -> bool;
+    /// Ejects the currently loaded disc
+    fn eject_disc(&mut self) -> Result<(), ()>;
+    /// Insert the currently selected image
+    fn insert_disc(&mut self) -> Result<(), ()>;
+    /// Allocate a new image index
+    fn add_image_index(&mut self) -> Result<(), ()>;
+    /// Replace the image at `index`
+    fn replace_image_index(&mut self, index: usize, path: &Path) -> Result<(), ()>;
 }
 
 /// Global context instance holding our emulator state. Libretro doesn't support multi-instancing
@@ -141,6 +163,7 @@ pub enum Environment {
     GetSystemDirectory = 9,
     SetPixelFormat = 10,
     SetInputDescriptors = 11,
+    SetDiskControlInterface = 13,
     SetHwRender = 14,
     GetVariable = 15,
     SetVariables = 16,
@@ -151,6 +174,8 @@ pub enum Environment {
     SetSystemAvInfo = 32,
     SetControllerInfo = 35,
     SetGeometry = 37,
+    GetDiskControlInterfaceVersion = 57,
+    SetDiskControlExtInterface = 58,
 }
 
 /// Controller types supported by libretro
@@ -647,6 +672,234 @@ pub mod log {
     }
 }
 
+pub mod disc_control {
+    use super::{call_environment, call_environment_mut, context, Environment, GameInfo};
+    use libc::{c_char, c_uint, size_t};
+    use std::ffi::CStr;
+
+    pub type SetEjectStateFn = extern "C" fn(ejected: bool) -> bool;
+    pub type GetEjectStateFn = extern "C" fn() -> bool;
+    pub type GetImageIndexFn = extern "C" fn() -> c_uint;
+    pub type SetImageIndexFn = extern "C" fn(index: c_uint) -> bool;
+    pub type GetNumImagesFn = extern "C" fn() -> c_uint;
+    pub type ReplaceImageIndexFn = extern "C" fn(index: c_uint, info: *const GameInfo) -> bool;
+    pub type AddImageIndexFn = extern "C" fn() -> bool;
+    pub type SetInitialImageFn = extern "C" fn(index: c_uint, path: *const c_char) -> bool;
+    pub type GetImagePathFn = extern "C" fn(index: c_uint, path: *mut c_char, len: size_t) -> bool;
+    pub type GetImageLabelFn =
+        extern "C" fn(index: c_uint, label: *mut c_char, len: size_t) -> bool;
+
+    #[repr(C)]
+    pub struct DiscControlCallback {
+        set_eject_state: SetEjectStateFn,
+        get_eject_state: GetEjectStateFn,
+        get_image_index: GetImageIndexFn,
+        set_image_index: SetImageIndexFn,
+        get_num_images: GetNumImagesFn,
+        replace_image_index: ReplaceImageIndexFn,
+        add_image_index: AddImageIndexFn,
+    }
+
+    #[repr(C)]
+    pub struct DiscControlExtCallback {
+        set_eject_state: SetEjectStateFn,
+        get_eject_state: GetEjectStateFn,
+        get_image_index: GetImageIndexFn,
+        set_image_index: SetImageIndexFn,
+        get_num_images: GetNumImagesFn,
+        replace_image_index: ReplaceImageIndexFn,
+        add_image_index: AddImageIndexFn,
+        set_initial_image: SetInitialImageFn,
+        get_image_path: GetImagePathFn,
+        get_image_label: GetImageLabelFn,
+    }
+
+    extern "C" fn set_eject_state(ejected: bool) -> bool {
+        let context = context();
+
+        if context.is_disc_ejected() == ejected {
+            return true;
+        }
+
+        if ejected {
+            context.eject_disc()
+        } else {
+            context.insert_disc()
+        }
+        .is_ok()
+    }
+
+    extern "C" fn get_eject_state() -> bool {
+        context().is_disc_ejected()
+    }
+
+    extern "C" fn get_image_index() -> c_uint {
+        context().get_image_index() as _
+    }
+
+    extern "C" fn set_image_index(index: c_uint) -> bool {
+        context().set_image_index(index as usize).is_ok()
+    }
+
+    extern "C" fn get_num_images() -> c_uint {
+        context().get_num_images() as _
+    }
+
+    extern "C" fn replace_image_index(index: c_uint, info: *const GameInfo) -> bool {
+        let info = super::ptr_as_ref(info).unwrap();
+
+        if info.path.is_null() {
+            warn!("No path in GameInfo!");
+            return false;
+        }
+
+        let path = unsafe { CStr::from_ptr(info.path) };
+
+        let path = match super::build_path(path) {
+            Some(p) => p,
+            None => return false,
+        };
+
+        context()
+            .replace_image_index(index as usize, path.as_ref())
+            .is_ok()
+    }
+
+    extern "C" fn add_image_index() -> bool {
+        context().add_image_index().is_ok()
+    }
+
+    extern "C" fn set_initial_image(_index: c_uint, _path: *const c_char) -> bool {
+        // To implement this we need to cache the index and pass it in retro_load_game. I'm not
+        // sure why `path` is set here though...
+        //
+        // Probably not necessary until we implement m3u loading.
+        warn!("Implement set_initial_image");
+        false
+    }
+
+    extern "C" fn get_image_path(index: c_uint, path: *mut c_char, len: size_t) -> bool {
+        let pathbuf = unsafe { ::std::slice::from_raw_parts_mut(path as *mut u8, len) };
+
+        for b in pathbuf.iter_mut() {
+            *b = 0;
+        }
+
+        let path = match context().get_image_path(index as usize) {
+            Some(p) => p,
+            None => {
+                error!("No disc image at index {}", index);
+                return false;
+            }
+        };
+
+        let bytes = match path.to_str() {
+            Some(s) => s.bytes(),
+            None => {
+                error!("Couldn't convert mage path {:?} to str", path);
+                return false;
+            }
+        };
+
+        if bytes.len() >= len {
+            error!(
+                "Image path length for {:?} is greater than the libretro buffer of {}B",
+                path, len
+            );
+            return false;
+        }
+
+        for (i, b) in bytes.enumerate() {
+            pathbuf[i] = b;
+        }
+
+        true
+    }
+
+    extern "C" fn get_image_label(index: c_uint, label: *mut c_char, len: size_t) -> bool {
+        let buf = unsafe { ::std::slice::from_raw_parts_mut(label as *mut u8, len) };
+
+        for b in buf.iter_mut() {
+            *b = 0;
+        }
+
+        let label = match context().get_image_label(index as usize) {
+            Some(l) => l,
+            None => {
+                error!("No disc image at index {}", index);
+                return false;
+            }
+        };
+
+        if label.len() >= len {
+            error!(
+                "Image label length for {:?} is greater than the libretro buffer of {}B",
+                label, len
+            );
+            return false;
+        }
+
+        for (i, b) in label.bytes().enumerate() {
+            buf[i] = b;
+        }
+
+        true
+    }
+
+    static DISC_CONTROL_CALLBACK: DiscControlCallback = DiscControlCallback {
+        set_eject_state,
+        get_eject_state,
+        get_image_index,
+        set_image_index,
+        get_num_images,
+        replace_image_index,
+        add_image_index,
+    };
+
+    static DISC_CONTROL_EXT_CALLBACK: DiscControlExtCallback = DiscControlExtCallback {
+        set_eject_state,
+        get_eject_state,
+        get_image_index,
+        set_image_index,
+        get_num_images,
+        replace_image_index,
+        add_image_index,
+        set_initial_image,
+        get_image_path,
+        get_image_label,
+    };
+
+    pub fn register_disc_control() -> bool {
+        let mut v: c_uint = 0;
+
+        if unsafe { call_environment_mut(Environment::GetDiskControlInterfaceVersion, &mut v) } {
+            info!("Disc control interface version {}", v);
+        } else {
+            warn!("Couldn't get the libretro disc control interface version");
+            v = 0;
+        }
+
+        let ok = if v >= 1 {
+            unsafe {
+                call_environment(
+                    Environment::SetDiskControlExtInterface,
+                    &DISC_CONTROL_EXT_CALLBACK,
+                )
+            }
+        } else {
+            unsafe {
+                call_environment(Environment::SetDiskControlInterface, &DISC_CONTROL_CALLBACK)
+            }
+        };
+
+        if !ok {
+            warn!("Failed to register disc control interface");
+        }
+
+        ok
+    }
+}
+
 //*******************************************
 // Libretro callbacks loaded by the frontend
 //*******************************************
@@ -892,6 +1145,8 @@ pub extern "C" fn retro_init() {
     unsafe {
         if FIRST_INIT {
             super::init();
+            disc_control::register_disc_control();
+
             FIRST_INIT = false;
         }
     }
@@ -1140,6 +1395,46 @@ pub mod dummy {
 
         fn unserialize(&mut self, _: &[u8]) -> Result<(), ()> {
             panic!("Called unserialize with no context!");
+        }
+
+        fn get_num_images(&self) -> usize {
+            panic!("Called get_num_images with no context!");
+        }
+
+        fn get_image_index(&self) -> usize {
+            panic!("Called get_image_index with no context!");
+        }
+
+        fn get_image_path(&self, _: usize) -> Option<&super::Path> {
+            panic!("Called get_image_path with no context!")
+        }
+
+        fn is_disc_ejected(&self) -> bool {
+            true
+        }
+
+        fn eject_disc(&mut self) -> Result<(), ()> {
+            Ok(())
+        }
+
+        fn insert_disc(&mut self) -> Result<(), ()> {
+            panic!("Called insert_disc with no context!")
+        }
+
+        fn set_image_index(&mut self, _: usize) -> ::std::result::Result<(), ()> {
+            panic!("Called set_image_index with no context!")
+        }
+
+        fn get_image_label(&self, _: usize) -> Option<String> {
+            panic!("Called get_image_label with no context!")
+        }
+
+        fn add_image_index(&mut self) -> Result<(), ()> {
+            panic!("Called add_image_index with no context!")
+        }
+
+        fn replace_image_index(&mut self, _: usize, _: &super::Path) -> Result<(), ()> {
+            panic!("Called replace_image_index with no context!")
         }
     }
 }

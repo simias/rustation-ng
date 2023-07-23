@@ -61,6 +61,18 @@ impl CdInterface {
     pub fn set_cd_loading_speed(&mut self, loading_speed: u8) {
         self.cdc.set_cd_loading_speed(loading_speed);
     }
+
+    pub fn disc_present(&self) -> bool {
+        self.cdc.disc_present()
+    }
+
+    pub fn eject_disc(&mut self) -> Option<Disc> {
+        self.cdc.take_disc()
+    }
+
+    pub fn load_disc(&mut self, disc: Disc) {
+        self.cdc.load_disc(disc)
+    }
 }
 
 /// Called by the DMA when it wants to get our CD data

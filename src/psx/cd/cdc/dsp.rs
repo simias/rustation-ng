@@ -121,6 +121,10 @@ impl Dsp {
         dsp
     }
 
+    pub fn disc_removed(&mut self) {
+        self.focus_ok = false;
+    }
+
     fn is_busy(&self) -> bool {
         !matches!(self.state, State::Idle)
     }
