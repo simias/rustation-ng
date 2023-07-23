@@ -968,12 +968,16 @@ mod options {
             memory_card_1_type: MemoryCardType, parse_memcard_index
                 => "Memory card slot 1; \
                 per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+                per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
                 common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+                common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
                 disconnected";
             memory_card_2_type: MemoryCardType, parse_memcard_index
                 => "Memory card slot 2; \
                 common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+                common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
                 per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+                per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
                 disconnected";
         });
 
