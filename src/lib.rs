@@ -93,6 +93,8 @@ struct Context {
     cur_image: usize,
     /// The type of controller connected on the two input ports
     controller_type: [libretro::InputDevice; 2],
+    /// The type of MemoryCards connected to the console (user-configurable)
+    memcard_types: [options::MemoryCardType; 2],
     /// Objects used to deal with reading/storing the memory card images to files
     memcard_files: [MemoryCardFile; 2],
     /// Internal frame width
@@ -117,6 +119,7 @@ impl Context {
             // Start with both port disconnected and wait for the frontend to tell us what to use
             // in `set_controller`
             controller_type: [libretro::InputDevice::None; 2],
+            memcard_types: [options::MemoryCardType::Disconnected; 2],
             memcard_files: [MemoryCardFile::dummy(), MemoryCardFile::dummy()],
             internal_width: 640,
             internal_height: 480,
@@ -297,6 +300,7 @@ impl Context {
             let device = Box::new(DisconnectedDevice);
             m.connect_device(device);
         }
+
         for m in self.memcard_files.iter_mut() {
             *m = MemoryCardFile::dummy();
         }
@@ -316,51 +320,38 @@ impl Context {
             }
         };
 
-        // Memory Card 1: game specific
-        //
-        // XXX Make this configurable at some point.
-        let mc1_filename = {
-            let p: &Path = self.cur_image().basename().as_ref();
-            let p = p.with_extension("0.mcr");
+        for slot in 0..=1 {
+            let filename = match self.memcard_types[slot] {
+                options::MemoryCardType::Disconnected => continue,
+                options::MemoryCardType::Common(idx) => {
+                    let p = format!("rustation_common.{}.mcr", idx);
 
-            save_path.join(p)
-        };
-        // Memory Card 2: same for all games
-        //
-        // XXX Make this configurable at some point.
-        let mc2_filename = save_path.join("rustation_common.1.mcr");
+                    save_path.join(p)
+                }
+                options::MemoryCardType::PerGame(idx) => {
+                    let p: &Path = self.cur_image().basename().as_ref();
+                    let p = p.with_extension(format!("{}.mcr", idx));
 
-        let memory_cards = self.psx.pad_memcard.memory_cards_mut();
+                    save_path.join(p)
+                }
+            };
 
-        match MemoryCardFile::load_or_create(&mc1_filename) {
-            Ok((mcf, mc)) => {
-                // Success
-                info!("Memory Card 1 is {}", mcf.path().display());
-                memory_cards[0].connect_device(Box::new(mc));
-                self.memcard_files[0] = mcf;
-            }
-            Err(e) => {
-                error!(
-                    "Can't load or create memory card '{}': {}",
-                    mc1_filename.display(),
-                    e
-                );
-            }
-        }
+            match MemoryCardFile::load_or_create(&filename) {
+                Ok((mcf, mc)) => {
+                    // Success
+                    info!("Memory Card {} is {}", slot, mcf.path().display());
 
-        match MemoryCardFile::load_or_create(&mc2_filename) {
-            Ok((mcf, mc)) => {
-                // Success
-                info!("Memory Card 2 is {}", mcf.path().display());
-                memory_cards[1].connect_device(Box::new(mc));
-                self.memcard_files[1] = mcf;
-            }
-            Err(e) => {
-                error!(
-                    "Can't load or create memory card '{}': {}",
-                    mc2_filename.display(),
-                    e
-                );
+                    let memory_cards = self.psx.pad_memcard.memory_cards_mut();
+                    memory_cards[slot].connect_device(Box::new(mc));
+                    self.memcard_files[slot] = mcf;
+                }
+                Err(e) => {
+                    error!(
+                        "Can't load or create memory card '{}': {}",
+                        filename.display(),
+                        e
+                    );
+                }
             }
         }
     }
@@ -552,6 +543,21 @@ impl libretro::Context for Context {
         self.psx
             .gte
             .set_overclock(options::CoreOptions::gte_overclock());
+
+        let mut memcard_types = [
+            options::CoreOptions::memory_card_1_type(),
+            options::CoreOptions::memory_card_2_type(),
+        ];
+
+        if memcard_types[0] == memcard_types[1] {
+            warn!("Both memory cards are set to the same type, disconnecting slot 2");
+            memcard_types[1] = options::MemoryCardType::Disconnected;
+        }
+
+        if memcard_types != self.memcard_types {
+            self.memcard_types = memcard_types;
+            self.setup_memory_cards();
+        }
     }
 
     fn reset(&mut self) {
@@ -930,6 +936,13 @@ mod options {
         Exclusive,
     }
 
+    #[derive(PartialEq, Eq, Copy, Clone)]
+    pub enum MemoryCardType {
+        Disconnected,
+        Common(u16),
+        PerGame(u16),
+    }
+
     libretro_variables!(
         pub struct CoreOptions (prefix = "rustation") {
             internal_upscale_factor: u32, parse_upscale
@@ -952,7 +965,39 @@ mod options {
             analog_compensation: f32, parse_percent
                 => "Analog deadzone compensation; \
                 100%|105%|110%|115%|120%|130%|150%|50%|70%|80%|85%|90%|95%";
+            memory_card_1_type: MemoryCardType, parse_memcard_index
+                => "Memory card slot 1; \
+                per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+                common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+                disconnected";
+            memory_card_2_type: MemoryCardType, parse_memcard_index
+                => "Memory card slot 2; \
+                common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+                per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+                disconnected";
         });
+
+    fn parse_memcard_index(opt: &str) -> Result<MemoryCardType, ()> {
+        if opt == "disconnected" {
+            return Ok(MemoryCardType::Disconnected);
+        }
+
+        let mut s = opt.split('.');
+
+        let ty = s.next().ok_or(())?;
+        let index = s.next().ok_or(())?;
+
+        let index: u16 = index.parse().map_err(|_| ())?;
+
+        match ty {
+            "per-game" => Ok(MemoryCardType::PerGame(index)),
+            "common" => Ok(MemoryCardType::Common(index)),
+            _ => {
+                error!("Unkown memory card type {}", ty);
+                Err(())
+            }
+        }
+    }
 
     fn parse_upscale(opt: &str) -> Result<u32, <u32 as FromStr>::Err> {
         let num = opt.trim_matches(|c: char| !c.is_numeric());
