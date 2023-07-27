@@ -1099,7 +1099,7 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
         out_of_band: false,
     },
     Command {
-        handler: cmd_handle_poly_tri::<Opaque, TextureBlending, Shaded>,
+        handler: cmd_handle_poly_tri::<Opaque, TextureRaw, Shaded>,
         len: 9,
         fifo_len: 1,
         out_of_band: false,
@@ -1111,7 +1111,7 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
         out_of_band: false,
     },
     Command {
-        handler: cmd_handle_poly_tri::<Transparent, TextureBlending, Shaded>,
+        handler: cmd_handle_poly_tri::<Transparent, TextureRaw, Shaded>,
         len: 9,
         fifo_len: 1,
         out_of_band: false,
@@ -1147,7 +1147,7 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
         out_of_band: false,
     },
     Command {
-        handler: cmd_handle_poly_quad::<Opaque, TextureBlending, Shaded>,
+        handler: cmd_handle_poly_quad::<Opaque, TextureRaw, Shaded>,
         len: 12,
         fifo_len: 1,
         out_of_band: false,
@@ -1159,7 +1159,7 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
         out_of_band: false,
     },
     Command {
-        handler: cmd_handle_poly_quad::<Transparent, TextureBlending, Shaded>,
+        handler: cmd_handle_poly_quad::<Transparent, TextureRaw, Shaded>,
         len: 12,
         fifo_len: 1,
         out_of_band: false,
