@@ -1664,7 +1664,15 @@ impl TextureMapper {
         // 256 for 8bpp, 16 for 4bpp
         let nentries = 256 >> ((pts - 1) * 4);
 
-        self.clut_cache[..nentries].copy_from_slice(&vram[clut_off..(clut_off + nentries)]);
+        // Dino Crisis 2 sets a weird palette when displaying the Superintendent hologram:
+        //
+        // clut_x = 1008, clut_y = 511, nentries = 256
+        //
+        // Naturally this goes out of bounds, but I presume that we're supposed to wrap around (not
+        // tested on real hardware)
+        for i in 0..nentries {
+            self.clut_cache[i] = vram[(clut_off + i) % (1024 * 512)];
+        }
     }
 
     pub fn set_draw_mode(&mut self, mode: u32) {
