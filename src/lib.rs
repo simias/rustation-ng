@@ -356,14 +356,6 @@ impl Context {
         }
     }
 
-    /// Called once per frame in order to save the Memory Card to disc if necessary
-    fn check_memory_cards(&mut self) {
-        let memory_cards = self.psx.pad_memcard.memory_cards();
-
-        self.memcard_files[0].maybe_dump(memory_cards[0].device());
-        self.memcard_files[1].maybe_dump(memory_cards[1].device());
-    }
-
     /// Called when we're about to quit to force-flush any pending Memory Card write
     fn flush_memory_cards(&mut self) {
         let memory_cards = self.psx.pad_memcard.memory_cards();
@@ -482,7 +474,22 @@ impl libretro::Context for Context {
         // Clear the emulator's buffer for next frame
         self.psx.clear_audio_samples();
 
-        self.check_memory_cards();
+        // Refresh memory cards
+        let mut memory_cards = self.psx.pad_memcard.memory_cards_mut();
+        for (file, mc) in self.memcard_files.iter_mut().zip(memory_cards.iter_mut()) {
+            let device = mc.device_mut();
+
+            device.new_frame();
+            file.maybe_dump(device);
+        }
+
+        // Refresh pads
+        let mut gamepads = self.psx.pad_memcard.gamepads_mut();
+        for gp in gamepads.iter_mut() {
+            let device = gp.device_mut();
+
+            device.new_frame();
+        }
     }
 
     fn get_system_av_info(&self) -> libretro::SystemAvInfo {

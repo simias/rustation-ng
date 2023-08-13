@@ -167,6 +167,9 @@ pub trait DeviceInterface {
 
     /// Called when the device is connected to a console
     fn connected(&mut self) {}
+
+    /// Called once per frame
+    fn new_frame(&mut self) {}
 }
 
 /// Dummy profile emulating an empty pad or memory card slot

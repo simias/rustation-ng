@@ -21,6 +21,10 @@ pub struct MemoryCard {
     /// Buffer holding the memory card write data while it's being received, plus the checksum
     /// byte.
     write_buffer: [u8; 129],
+    /// Most games (and the BIOS) don't seem to notice if we swap memory cards without going
+    /// through a disconnected state, so we use this counter to disable the memory card for a few
+    /// frames upon disconnection
+    disabled_frames: u16,
 }
 
 impl MemoryCard {
@@ -43,6 +47,7 @@ impl MemoryCard {
             sector_index: 0,
             last_command: 0,
             write_buffer: [0; 129],
+            disabled_frames: 0,
         }
     }
 
@@ -312,6 +317,10 @@ impl DeviceInterface for MemoryCard {
     }
 
     fn handle_command(&mut self, seq: u8, cmd: u8) -> (u8, DsrState) {
+        if self.disabled_frames > 0 {
+            return (0xff, DsrState::Idle);
+        }
+
         let (resp, dsr_delay) = match seq {
             // First byte should be 0x81 if the command targets the memory card
             0 => (0xff, if cmd == 0x81 { Some(350) } else { None }),
@@ -371,6 +380,16 @@ impl DeviceInterface for MemoryCard {
         //
         // Of course if the savestate was made during a memory card access, all bets are off.
         self.has_been_written = false;
+
+        // Disable the memory card (that is, make it look as if there's no memory card connected)
+        // for about two seconds.
+        self.disabled_frames = 120;
+    }
+
+    fn new_frame(&mut self) {
+        if self.disabled_frames > 0 {
+            self.disabled_frames -= 1;
+        }
     }
 }
 
