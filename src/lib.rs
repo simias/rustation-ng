@@ -101,6 +101,12 @@ struct Context {
     internal_width: u32,
     /// Internal frame height
     internal_height: u32,
+    /// Current max width
+    max_width: u32,
+    /// Current max height
+    max_height: u32,
+    /// Current aspect ratio
+    aspect_ratio: f32,
     /// Button combination used to control the analog button
     analog_combo: AnalogCombo,
     /// Ratio to match the analog deadzone of the emulator's controller to that of a real DualShock
@@ -123,6 +129,9 @@ impl Context {
             memcard_files: [MemoryCardFile::dummy(), MemoryCardFile::dummy()],
             internal_width: 640,
             internal_height: 480,
+            max_width: 640,
+            max_height: 576,
+            aspect_ratio: 4. / 3.,
             analog_combo: AnalogCombo::SelectR3,
             analog_compensation: 1.,
         };
@@ -384,8 +393,16 @@ impl Context {
         let (w, h) = vram_display_mode.max_resolution();
         let aspect_ratio = vram_display_mode.aspect_ratio();
 
-        let max_width = (w * upscaling) as libc::c_uint;
-        let max_height = (h * upscaling) as libc::c_uint;
+        let max_width;
+        let max_height;
+        if w <= 640 && h <= 576 {
+            max_width = (640 * upscaling) as libc::c_uint;
+            max_height = (576 * upscaling) as libc::c_uint;
+        } else {
+            // Normally only used in "weird" modes such as "show full VRAM"
+            max_width = (w * upscaling) as libc::c_uint;
+            max_height = (h * upscaling) as libc::c_uint;
+        }
 
         libretro::GameGeometry {
             base_width: self.internal_width,
@@ -400,13 +417,21 @@ impl Context {
         let mut frame = self.psx.last_frame();
 
         if frame.width != self.internal_width || frame.height != self.internal_height {
-            // Internal resolution changed
+            // Internal resolution changed, see if we need to adjust the geometry
             self.internal_width = frame.width;
             self.internal_height = frame.height;
 
             let geom = self.get_geometry();
-            libretro::set_geometry(&geom);
 
+            if geom.aspect_ratio != self.aspect_ratio
+                || geom.max_width != self.max_width
+                || geom.max_height != self.max_height
+            {
+                self.max_width = geom.max_width;
+                self.max_height = geom.max_height;
+                self.aspect_ratio = geom.aspect_ratio;
+                libretro::set_geometry(&geom);
+            }
             frame = self.psx.last_frame();
         }
 
