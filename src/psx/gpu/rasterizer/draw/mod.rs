@@ -485,7 +485,7 @@ impl Rasterizer {
                                     ((p >> 12) & 0xf) as u8,
                                 ];
 
-                                let g = n[i & 2];
+                                let g = n[i & 3];
                                 let g = g | g << 4;
 
                                 Pixel::from_rgb(g, g, g).0
