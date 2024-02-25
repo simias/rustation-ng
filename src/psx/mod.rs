@@ -41,7 +41,7 @@ pub struct Psx {
     /// Executable memory: RAM, Bios etc...
     xmem: xmem::XMemory,
     scratch_pad: ScratchPad,
-    spu: spu::Spu,
+    pub spu: spu::Spu,
     dma: dma::Dma,
     timers: timers::Timers,
     pub gpu: gpu::Gpu,

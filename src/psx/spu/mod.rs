@@ -100,6 +100,9 @@ pub struct Spu {
     /// Reverb outpu sample upsampler, right
     #[serde(default)]
     reverb_upsampler_right: ReverbResampler,
+    /// Used to override the emulation and force reverb off
+    #[serde(default)]
+    reverb_enable_override: bool,
 }
 
 impl Spu {
@@ -161,7 +164,12 @@ impl Spu {
             reverb_downsampler_right: ReverbResampler::new(),
             reverb_upsampler_left: ReverbResampler::new(),
             reverb_upsampler_right: ReverbResampler::new(),
+            reverb_enable_override: true,
         }
+    }
+
+    pub fn set_reverb_enable(&mut self, en: bool) {
+        self.reverb_enable_override = en
     }
 
     /// Returns the value of the control register
@@ -465,8 +473,121 @@ fn run_reverb_cycle(psx: &mut Psx, (left_in, right_in): (i16, i16)) -> (i16, i16
         }) >> 14
     }
 
-    if psx.spu.reverb_enabled() {
+    if psx.spu.reverb_enabled() && psx.spu.reverb_enable_override {
         if psx.spu.reverb_run_right {
+            // IIR processing
+            let sample = i32::from(psx.spu.reverb_downsampler_right.resample());
+
+            let in_mix =
+                (sample * i32::from(psx.spu.regs[regmap::REVERB_INPUT_VOLUME_RIGHT] as i16)) >> 15;
+
+            let reflect_vol = i32::from(psx.spu.regs[regmap::REVERB_REFLECT_VOLUME2] as i16);
+
+            let same_side_sample = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_SAME_RIGHT2],
+            ));
+            let same_side_mix = (same_side_sample * reflect_vol) >> 15;
+
+            let diff_side_sample = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_DIFF_RIGHT2],
+            ));
+            let diff_side_mix = (diff_side_sample * reflect_vol) >> 15;
+
+            let input_same = saturate_to_i16(same_side_mix + in_mix);
+            let input_diff = saturate_to_i16(diff_side_mix + in_mix);
+
+            let reflect_iir_vol = psx.spu.regs[regmap::REVERB_REFLECT_VOLUME1] as i16;
+            let input_same_alpha = (i32::from(input_same) * i32::from(reflect_iir_vol)) >> 14;
+            let input_diff_alpha = (i32::from(input_diff) * i32::from(reflect_iir_vol)) >> 14;
+
+            let iir_same = saturate_to_i16(
+                (input_same_alpha
+                    + iir_mul(
+                        reflect_iir_vol,
+                        load_reverb_sample_before(
+                            psx,
+                            psx.spu.regs[regmap::REVERB_REFLECT_SAME_RIGHT1],
+                        ),
+                    ))
+                    >> 1,
+            );
+            let iir_diff = saturate_to_i16(
+                (input_diff_alpha
+                    + iir_mul(
+                        reflect_iir_vol,
+                        load_reverb_sample_before(
+                            psx,
+                            psx.spu.regs[regmap::REVERB_REFLECT_DIFF_RIGHT1],
+                        ),
+                    ))
+                    >> 1,
+            );
+
+            store_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_SAME_RIGHT1],
+                iir_same,
+            );
+            store_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_DIFF_RIGHT1],
+                iir_diff,
+            );
+
+            let early_echo = saturate_to_i16(
+                (((i32::from(load_reverb_sample(
+                    psx,
+                    psx.spu.regs[regmap::REVERB_COMB_RIGHT1],
+                )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME1] as i16))
+                    >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_RIGHT2],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME2] as i16))
+                        >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_RIGHT3],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME3] as i16))
+                        >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_RIGHT4],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME4] as i16))
+                        >> 14))
+                    >> 1,
+            );
+
+            let apf_in1 = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_APF_RIGHT1]
+                    .wrapping_add(psx.spu.regs[regmap::REVERB_APF_OFFSET1]),
+            ));
+            let apf_in2 = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_APF_RIGHT2]
+                    .wrapping_add(psx.spu.regs[regmap::REVERB_APF_OFFSET2]),
+            ));
+
+            let apf_vol1 = i32::from(psx.spu.regs[regmap::REVERB_APF_VOLUME1] as i16);
+            let apf_vol2 = i32::from(psx.spu.regs[regmap::REVERB_APF_VOLUME2] as i16);
+
+            let out_1 = saturate_to_i16(i32::from(early_echo) - ((apf_in1 * apf_vol1) >> 15));
+            let out_2 = saturate_to_i16(
+                ((i32::from(early_echo) * apf_vol1) >> 15)
+                    - ((apf_in1 * -apf_vol1) >> 15)
+                    - ((apf_in2 * apf_vol2) >> 15),
+            );
+
+            store_reverb_sample(psx, psx.spu.regs[regmap::REVERB_APF_RIGHT1], out_1);
+            store_reverb_sample(psx, psx.spu.regs[regmap::REVERB_APF_RIGHT2], out_2);
+
+            psx.spu.reverb_upsampler_left.push_sample(0);
+            psx.spu
+                .reverb_upsampler_right
+                .push_sample(saturate_to_i16((i32::from(out_1) + i32::from(out_2)) >> 1));
         } else {
             // IIR processing
             let sample = i32::from(psx.spu.reverb_downsampler_left.resample());
@@ -593,7 +714,7 @@ fn run_reverb_cycle(psx: &mut Psx, (left_in, right_in): (i16, i16)) -> (i16, i16
     psx.spu.reverb_run_right = !psx.spu.reverb_run_right;
 
     let reverb_left = psx.spu.reverb_upsampler_left.resample();
-    let reverb_right = psx.spu.reverb_upsampler_left.resample();
+    let reverb_right = psx.spu.reverb_upsampler_right.resample();
 
     (reverb_left, reverb_right)
 }

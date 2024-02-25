@@ -573,6 +573,10 @@ impl libretro::Context for Context {
             .set_cd_loading_speed(options::CoreOptions::cd_speed() / 2);
 
         self.psx
+            .spu
+            .set_reverb_enable(options::CoreOptions::reverb_enable());
+
+        self.psx
             .gte
             .set_overclock(options::CoreOptions::gte_overclock());
 
@@ -991,6 +995,8 @@ mod options {
             => "GTE overclock; disabled|enabled";
         cd_speed: u8, parse_u8
             => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
+        reverb_enable: bool, parse_bool
+            => "Enable audio reverberation; enabled|disabled";
         analog_combo: AnalogCombo, parse_analog_combo
             => "Analog toggle button combo; \
             Select + R3|Select + L3|L3 + R3";
