@@ -976,42 +976,42 @@ mod options {
     }
 
     libretro_variables!(
-        pub struct CoreOptions (prefix = "rustation") {
-            internal_upscale_factor: u32, parse_upscale
-                => "Internal upscaling factor; 1x (native)";
-            internal_color_depth: u8, parse_u8
-                => "Internal color depth; dithered 15bpp (native)|24bpp";
-            display_full_vram: VRamDisplayMode, parse_full_vram
-                => "Display full VRAM; disabled|16bpp|8bpp|4bpp";
-            force_transparency: bool, parse_bool
-                => "Force transparency for all draw commands; disabled|enabled";
-            wireframe: WireframeMode, parse_wireframe
-                => "Draw wireframe for triangles and quads; disabled|overlay|wireframe only";
-            gte_overclock: bool, parse_bool
-                => "GTE overclock; disabled|enabled";
-            cd_speed: u8, parse_u8
-                => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
-            analog_combo: AnalogCombo, parse_analog_combo
-                => "Analog toggle button combo; \
-                Select + R3|Select + L3|L3 + R3";
-            analog_compensation: f32, parse_percent
-                => "Analog deadzone compensation; \
-                100%|105%|110%|115%|120%|130%|150%|50%|70%|80%|85%|90%|95%";
-            memory_card_1_type: MemoryCardType, parse_memcard_index
-                => "Memory card slot 1; \
-                per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
-                per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
-                common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
-                common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
-                disconnected";
-            memory_card_2_type: MemoryCardType, parse_memcard_index
-                => "Memory card slot 2; \
-                common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
-                common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
-                per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
-                per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
-                disconnected";
-        });
+    pub struct CoreOptions (prefix = "rustation") {
+        internal_upscale_factor: u32, parse_upscale
+            => "Internal upscaling factor; 1x (native)";
+        internal_color_depth: u8, parse_u8
+            => "Internal color depth; dithered 15bpp (native)|24bpp";
+        display_full_vram: VRamDisplayMode, parse_full_vram
+            => "Display full VRAM; disabled|16bpp|8bpp|4bpp";
+        force_transparency: bool, parse_bool
+            => "Force transparency for all draw commands; disabled|enabled";
+        wireframe: WireframeMode, parse_wireframe
+            => "Draw wireframe for triangles and quads; disabled|overlay|wireframe only";
+        gte_overclock: bool, parse_bool
+            => "GTE overclock; disabled|enabled";
+        cd_speed: u8, parse_u8
+            => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
+        analog_combo: AnalogCombo, parse_analog_combo
+            => "Analog toggle button combo; \
+            Select + R3|Select + L3|L3 + R3";
+        analog_compensation: f32, parse_percent
+            => "Analog deadzone compensation; \
+            100%|105%|110%|115%|120%|130%|150%|50%|70%|80%|85%|90%|95%";
+        memory_card_1_type: MemoryCardType, parse_memcard_index
+            => "Memory card slot 1; \
+            per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+            per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
+            common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+            common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
+            disconnected";
+        memory_card_2_type: MemoryCardType, parse_memcard_index
+            => "Memory card slot 2; \
+            common.0|common.1|common.2|common.3|common.4|common.5|common.6|common.7|common.8|common.9|\
+            common.10|common.11|common.12|common.13|common.14|common.15|common.16|common.17|common.18|common.19|\
+            per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
+            per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
+            disconnected";
+    });
 
     fn parse_memcard_index(opt: &str) -> Result<MemoryCardType, ()> {
         if opt == "disconnected" {

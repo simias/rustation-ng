@@ -4,9 +4,11 @@
 
 mod fifo;
 mod fir;
+mod reverb_resampler;
 
 use super::{cd, cpu, irq, sync, AccessWidth, Addressable, CycleCount, Psx};
 use fifo::DecoderFifo;
+use reverb_resampler::ReverbResampler;
 use std::ops::{Index, IndexMut};
 
 const SPUSYNC: sync::SyncToken = sync::SyncToken::Spu;
@@ -59,12 +61,45 @@ pub struct Spu {
     audio_buffer: [i16; 2048],
     /// Write pointer into the audio_buffer
     audio_buffer_index: u32,
+    /// Mix volume for the samples coming from the CD, left
+    #[serde(default)]
+    cd_volume_left: i16,
+    /// Mix volume for the samples coming from the CD, right
+    #[serde(default)]
+    cd_volume_right: i16,
     /// First of the two LFSR counters
     noise_counter1: u16,
     /// Second of the two LFSR counters
     noise_counter2: u8,
     /// Noise Linear Feedback Shift Register
     noise_lfsr: u16,
+    /// Mix volume for the samples coming from the reverb, left
+    #[serde(default)]
+    reverb_out_volume_left: i16,
+    /// Mix volume for the samples coming from the reverb, right
+    #[serde(default)]
+    reverb_out_volume_right: i16,
+    /// Start address of the working memory for the reverb
+    #[serde(default)]
+    reverb_start: RamIndex,
+    /// Current index in the working memory for the reverb
+    #[serde(default)]
+    reverb_index: RamIndex,
+    /// Which stereo side should we run reverb on next
+    #[serde(default)]
+    reverb_run_right: bool,
+    /// Reverb input sample downsampler, left
+    #[serde(default)]
+    reverb_downsampler_left: ReverbResampler,
+    /// Reverb input sample downsampler, right
+    #[serde(default)]
+    reverb_downsampler_right: ReverbResampler,
+    /// Reverb output sample upsampler, left
+    #[serde(default)]
+    reverb_upsampler_left: ReverbResampler,
+    /// Reverb outpu sample upsampler, right
+    #[serde(default)]
+    reverb_upsampler_right: ReverbResampler,
 }
 
 impl Spu {
@@ -112,9 +147,20 @@ impl Spu {
             ram: [0; SPU_RAM_SIZE],
             audio_buffer: [0; 2048],
             audio_buffer_index: 0,
+            cd_volume_left: 0,
+            cd_volume_right: 0,
             noise_counter1: 0,
             noise_counter2: 0,
             noise_lfsr: 0,
+            reverb_out_volume_left: 0,
+            reverb_out_volume_right: 0,
+            reverb_start: 0,
+            reverb_index: 0,
+            reverb_run_right: false,
+            reverb_downsampler_left: ReverbResampler::new(),
+            reverb_downsampler_right: ReverbResampler::new(),
+            reverb_upsampler_left: ReverbResampler::new(),
+            reverb_upsampler_right: ReverbResampler::new(),
         }
     }
 
@@ -142,6 +188,16 @@ impl Spu {
     /// True if the SPU plays the audio coming from the CD
     fn cd_audio_enabled(&self) -> bool {
         self.control() & 1 != 0
+    }
+
+    /// True if the reverberation module is enabled
+    fn reverb_enabled(&self) -> bool {
+        self.control() & (1 << 7) != 0
+    }
+
+    /// True if the audio coming from the CD should be reverberated
+    fn cd_audio_reverb(&self) -> bool {
+        self.control() & (1 << 2) != 0
     }
 
     /// Update the status register
@@ -287,6 +343,10 @@ fn run_cycle(psx: &mut Psx) {
     let mut right_mix = 0;
     let mut sweep_factor = 0;
 
+    // Sum of the voices used for reverb
+    let mut left_reverb = 0;
+    let mut right_reverb = 0;
+
     for voice in 0..24 {
         let (left, right) = run_voice_cycle(psx, voice, &mut sweep_factor);
 
@@ -294,7 +354,8 @@ fn run_cycle(psx: &mut Psx) {
         right_mix += right;
 
         if psx.spu.is_voice_reverberated(voice) {
-            unimplemented!()
+            left_reverb += left;
+            right_reverb += right;
         }
     }
 
@@ -308,13 +369,40 @@ fn run_cycle(psx: &mut Psx) {
         // Mute bit doesn't actually mute CD audio, just the SPU voices.
         left_mix = 0;
         right_mix = 0;
+
+        // Mednafen does this too, I suppose it makes sense?
+        left_reverb = 0;
+        right_reverb = 0;
     }
 
     let [cd_left, cd_right] = cd::run_audio_cycle(psx);
 
     if psx.spu.cd_audio_enabled() {
-        left_mix += i32::from(cd_left);
-        right_mix += i32::from(cd_right);
+        let cd_left = (i32::from(cd_left) * i32::from(psx.spu.cd_volume_left)) >> 15;
+        let cd_right = (i32::from(cd_right) * i32::from(psx.spu.cd_volume_right)) >> 15;
+
+        left_mix += cd_left;
+        right_mix += cd_right;
+
+        if psx.spu.cd_audio_reverb() {
+            left_reverb += cd_left;
+            right_reverb += cd_right;
+        }
+    }
+
+    // Reverb
+    {
+        let reverb_samples = (saturate_to_i16(left_reverb), saturate_to_i16(right_reverb));
+
+        let (reverb_left, reverb_right) = run_reverb_cycle(psx, reverb_samples);
+
+        let reverb_left =
+            (i32::from(reverb_left) * i32::from(psx.spu.reverb_out_volume_left)) >> 15;
+        let reverb_right =
+            (i32::from(reverb_right) * i32::from(psx.spu.reverb_out_volume_right)) >> 15;
+
+        left_mix += reverb_left;
+        right_mix += reverb_right;
     }
 
     left_mix = saturate_to_i16(left_mix) as i32;
@@ -330,6 +418,184 @@ fn run_cycle(psx: &mut Psx) {
     psx.spu.capture_index &= 0x1ff;
 
     output_samples(psx, saturate_to_i16(left_mix), saturate_to_i16(right_mix));
+}
+
+fn reverb_sample_index(psx: &mut Psx, addr: u16, neg_offset: u32) -> RamIndex {
+    let idx = psx.spu.reverb_index + to_ram_index(addr) - neg_offset;
+
+    if idx <= 0x3_ffff {
+        idx
+    } else {
+        // Overflow, wrap around to the start of the reverb working area
+        psx.spu.reverb_start.wrapping_add(idx) & 0x3_ffff
+    }
+}
+
+fn store_reverb_sample(psx: &mut Psx, addr: u16, v: i16) {
+    let idx = reverb_sample_index(psx, addr, 0);
+
+    ram_write(psx, idx, v as u16)
+}
+
+fn load_reverb_sample(psx: &mut Psx, addr: u16) -> i16 {
+    let idx = reverb_sample_index(psx, addr, 0);
+
+    ram_read(psx, idx) as i16
+}
+
+fn load_reverb_sample_before(psx: &mut Psx, addr: u16) -> i16 {
+    let idx = reverb_sample_index(psx, addr, 1);
+
+    ram_read(psx, idx) as i16
+}
+
+/// Advance the reverb state machine. Should be called at 44.1kHz with the new reverb samples.
+fn run_reverb_cycle(psx: &mut Psx, (left_in, right_in): (i16, i16)) -> (i16, i16) {
+    // Reverb downsamples from 44.1Khz to 22.05kHz using a simple FIR filter
+    psx.spu.reverb_downsampler_left.push_sample(left_in);
+    psx.spu.reverb_downsampler_right.push_sample(right_in);
+
+    fn iir_mul(a: i16, b: i16) -> i32 {
+        (if a > i16::MIN {
+            (32768 - i32::from(a)) * i32::from(b)
+        } else if b > i16::MIN {
+            i32::from(b) * 32768
+        } else {
+            0
+        }) >> 14
+    }
+
+    if psx.spu.reverb_enabled() {
+        if psx.spu.reverb_run_right {
+        } else {
+            // IIR processing
+            let sample = i32::from(psx.spu.reverb_downsampler_left.resample());
+
+            let in_mix =
+                (sample * i32::from(psx.spu.regs[regmap::REVERB_INPUT_VOLUME_LEFT] as i16)) >> 15;
+
+            let reflect_vol = i32::from(psx.spu.regs[regmap::REVERB_REFLECT_VOLUME2] as i16);
+
+            let same_side_sample = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_SAME_LEFT2],
+            ));
+            let same_side_mix = (same_side_sample * reflect_vol) >> 15;
+
+            let diff_side_sample = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_DIFF_LEFT2],
+            ));
+            let diff_side_mix = (diff_side_sample * reflect_vol) >> 15;
+
+            let input_same = saturate_to_i16(same_side_mix + in_mix);
+            let input_diff = saturate_to_i16(diff_side_mix + in_mix);
+
+            let reflect_iir_vol = psx.spu.regs[regmap::REVERB_REFLECT_VOLUME1] as i16;
+            let input_same_alpha = (i32::from(input_same) * i32::from(reflect_iir_vol)) >> 14;
+            let input_diff_alpha = (i32::from(input_diff) * i32::from(reflect_iir_vol)) >> 14;
+
+            let iir_same = saturate_to_i16(
+                (input_same_alpha
+                    + iir_mul(
+                        reflect_iir_vol,
+                        load_reverb_sample_before(
+                            psx,
+                            psx.spu.regs[regmap::REVERB_REFLECT_SAME_LEFT1],
+                        ),
+                    ))
+                    >> 1,
+            );
+            let iir_diff = saturate_to_i16(
+                (input_diff_alpha
+                    + iir_mul(
+                        reflect_iir_vol,
+                        load_reverb_sample_before(
+                            psx,
+                            psx.spu.regs[regmap::REVERB_REFLECT_DIFF_LEFT1],
+                        ),
+                    ))
+                    >> 1,
+            );
+
+            store_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_SAME_LEFT1],
+                iir_same,
+            );
+            store_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_REFLECT_DIFF_LEFT1],
+                iir_diff,
+            );
+
+            let early_echo = saturate_to_i16(
+                (((i32::from(load_reverb_sample(
+                    psx,
+                    psx.spu.regs[regmap::REVERB_COMB_LEFT1],
+                )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME1] as i16))
+                    >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_LEFT2],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME2] as i16))
+                        >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_LEFT3],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME3] as i16))
+                        >> 14)
+                    + ((i32::from(load_reverb_sample(
+                        psx,
+                        psx.spu.regs[regmap::REVERB_COMB_LEFT4],
+                    )) * i32::from(psx.spu.regs[regmap::REVERB_COMB_VOLUME4] as i16))
+                        >> 14))
+                    >> 1,
+            );
+
+            let apf_in1 = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_APF_LEFT1]
+                    .wrapping_add(psx.spu.regs[regmap::REVERB_APF_OFFSET1]),
+            ));
+            let apf_in2 = i32::from(load_reverb_sample(
+                psx,
+                psx.spu.regs[regmap::REVERB_APF_LEFT2]
+                    .wrapping_add(psx.spu.regs[regmap::REVERB_APF_OFFSET2]),
+            ));
+
+            let apf_vol1 = i32::from(psx.spu.regs[regmap::REVERB_APF_VOLUME1] as i16);
+            let apf_vol2 = i32::from(psx.spu.regs[regmap::REVERB_APF_VOLUME2] as i16);
+
+            let out_1 = saturate_to_i16(i32::from(early_echo) - ((apf_in1 * apf_vol1) >> 15));
+            let out_2 = saturate_to_i16(
+                ((i32::from(early_echo) * apf_vol1) >> 15)
+                    - ((apf_in1 * -apf_vol1) >> 15)
+                    - ((apf_in2 * apf_vol2) >> 15),
+            );
+
+            store_reverb_sample(psx, psx.spu.regs[regmap::REVERB_APF_LEFT1], out_1);
+            store_reverb_sample(psx, psx.spu.regs[regmap::REVERB_APF_LEFT2], out_2);
+
+            psx.spu
+                .reverb_upsampler_left
+                .push_sample(saturate_to_i16((i32::from(out_1) + i32::from(out_2)) >> 1));
+            psx.spu.reverb_upsampler_right.push_sample(0);
+        }
+    }
+
+    if psx.spu.reverb_run_right {
+        psx.spu.reverb_index = psx.spu.reverb_index.wrapping_add(1);
+        if psx.spu.reverb_index > 0x3_ffff {
+            psx.spu.reverb_index = psx.spu.reverb_start;
+        }
+    }
+    psx.spu.reverb_run_right = !psx.spu.reverb_run_right;
+
+    let reverb_left = psx.spu.reverb_upsampler_left.resample();
+    let reverb_right = psx.spu.reverb_upsampler_left.resample();
+
+    (reverb_left, reverb_right)
 }
 
 /// Run `voice` for one cycle and return a pair of stereo samples
@@ -450,14 +716,14 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
 
         if new_block {
             // We're starting a new block
-            let header = ram_read(psx, psx.spu[voice].cur_index);
+            let header = ram_read_no_irq(psx, psx.spu[voice].cur_index);
 
             psx.spu[voice].set_block_header(header);
             psx.spu[voice].next_index();
         }
 
         // Decode 4 samples
-        let encoded = ram_read(psx, psx.spu[voice].cur_index);
+        let encoded = ram_read_no_irq(psx, psx.spu[voice].cur_index);
         psx.spu[voice].next_index();
         psx.spu[voice].decode(encoded);
     }
@@ -546,8 +812,8 @@ fn store16(psx: &mut Psx, off: u32, val: u16) {
         match index {
             regmap::MAIN_VOLUME_LEFT => psx.spu.main_volume_left.set_config(val),
             regmap::MAIN_VOLUME_RIGHT => psx.spu.main_volume_right.set_config(val),
-            regmap::REVERB_VOLUME_LEFT => (),
-            regmap::REVERB_VOLUME_RIGHT => (),
+            regmap::REVERB_VOLUME_LEFT => psx.spu.reverb_out_volume_left = val as i16,
+            regmap::REVERB_VOLUME_RIGHT => psx.spu.reverb_out_volume_right = val as i16,
             regmap::VOICE_ON_LO => to_lo(&mut psx.spu.voice_start, val),
             regmap::VOICE_ON_HI => to_hi(&mut psx.spu.voice_start, val),
             regmap::VOICE_OFF_LO => to_lo(&mut psx.spu.voice_stop, val),
@@ -559,11 +825,15 @@ fn store16(psx: &mut Psx, off: u32, val: u16) {
             regmap::VOICE_FM_MOD_EN_HI => to_hi(&mut psx.spu.voice_frequency_modulated, val),
             regmap::VOICE_NOISE_EN_LO => to_lo(&mut psx.spu.voice_noise, val),
             regmap::VOICE_NOISE_EN_HI => to_hi(&mut psx.spu.voice_noise, val),
-            regmap::VOICE_REVERB_EN_LO => (),
-            regmap::VOICE_REVERB_EN_HI => (),
+            regmap::VOICE_REVERB_EN_LO => to_lo(&mut psx.spu.voice_reverb, val),
+            regmap::VOICE_REVERB_EN_HI => to_hi(&mut psx.spu.voice_reverb, val),
             regmap::VOICE_STATUS_LO => to_lo(&mut psx.spu.voice_looped, val),
             regmap::VOICE_STATUS_HI => to_hi(&mut psx.spu.voice_looped, val),
-            regmap::REVERB_BASE => (),
+            regmap::REVERB_BASE => {
+                let idx = to_ram_index(val);
+                psx.spu.reverb_start = idx;
+                psx.spu.reverb_index = idx;
+            }
             regmap::IRQ_ADDRESS => {
                 psx.spu.irq_addr = to_ram_index(val);
                 check_for_irq(psx, psx.spu.ram_index);
@@ -591,8 +861,8 @@ fn store16(psx: &mut Psx, off: u32, val: u16) {
                     warn!("SPU TRANSFER_CONTROL set to 0x{:x}", val);
                 }
             }
-            regmap::CD_VOLUME_LEFT => (),
-            regmap::CD_VOLUME_RIGHT => (),
+            regmap::CD_VOLUME_LEFT => psx.spu.cd_volume_left = val as i16,
+            regmap::CD_VOLUME_RIGHT => psx.spu.cd_volume_right = val as i16,
             regmap::EXT_VOLUME_LEFT => (),
             regmap::EXT_VOLUME_RIGHT => (),
             // Reverb configuration
@@ -713,12 +983,18 @@ fn ram_write(psx: &mut Psx, index: RamIndex, val: u16) {
     psx.spu.ram[index] = val;
 }
 
-fn ram_read(psx: &mut Psx, index: RamIndex) -> u16 {
+fn ram_read_no_irq(psx: &mut Psx, index: RamIndex) -> u16 {
     let index = index as usize;
 
     debug_assert!(index < psx.spu.ram.len());
 
     psx.spu.ram[index]
+}
+
+fn ram_read(psx: &mut Psx, index: RamIndex) -> u16 {
+    check_for_irq(psx, index);
+
+    ram_read_no_irq(psx, index)
 }
 
 /// Trigger an IRQ if it's enabled in the control register and `addr` is equal to the `irq_addr`
