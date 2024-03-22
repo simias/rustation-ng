@@ -674,6 +674,7 @@ fn run_reverb_cycle(psx: &mut Psx, (left_in, right_in): (i16, i16)) -> (i16, i16
                     >> 1,
             );
 
+            // All-pass filter
             let apf_in1 = i32::from(load_reverb_sample(
                 psx,
                 psx.spu.regs[regmap::REVERB_APF_LEFT1]
@@ -988,11 +989,12 @@ fn store16(psx: &mut Psx, off: u32, val: u16) {
             regmap::EXT_VOLUME_RIGHT => (),
             // Reverb configuration
             regmap::REVERB_APF_OFFSET1..=regmap::REVERB_INPUT_VOLUME_RIGHT => (),
-            _ => unimplemented!(
-                "SPU store index {:x} (off = {:x}, abs = {:x})",
+            _ => warn!(
+                "SPU store index {:x} (off = {:x}, abs = {:x}): {:x}",
                 index,
                 off,
-                0x1f80_1c00 + off
+                0x1f80_1c00 + off,
+                val
             ),
         }
     } else if index < 0x130 {
@@ -1355,9 +1357,9 @@ impl Voice {
 
 /// Saturating cast from i32 to i16
 fn saturate_to_i16(v: i32) -> i16 {
-    if v < i16::min_value() as i32 {
+    if v < i32::from(i16::min_value()) {
         i16::min_value()
-    } else if v > i16::max_value() as i32 {
+    } else if v > i32::from(i16::max_value()) {
         i16::max_value()
     } else {
         v as i16

@@ -49,7 +49,8 @@ impl Default for ReverbResampler {
     }
 }
 
-/// FIR coefficients
+/// FIR coefficients. Mednafen and No$ use the same (although Mednafen uses an optimization that
+/// removes zeroes and special-cases the resampling, not sure if it's worth it).
 static FIR_COEFFS: [i16; 39] = [
     -1, 0, 2, 0, -10, 0, 35, 0, -103, 0, 266, 0, -616, 0, 1332, 0, -2960, 0, 10246, 16384, 10246,
     0, -2960, 0, 1332, 0, -616, 0, 266, 0, -103, 0, 35, 0, -10, 0, 2, 0, -1,
