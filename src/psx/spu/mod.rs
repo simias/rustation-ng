@@ -385,6 +385,10 @@ fn run_cycle(psx: &mut Psx) {
 
     let [cd_left, cd_right] = cd::run_audio_cycle(psx);
 
+    // Write CD audio (pre-volume) to the RAM
+    ram_write(psx, psx.spu.capture_index, cd_left as u16);
+    ram_write(psx, psx.spu.capture_index | 0x200, cd_right as u16);
+
     if psx.spu.cd_audio_enabled() {
         let cd_left = (i32::from(cd_left) * i32::from(psx.spu.cd_volume_left)) >> 15;
         let cd_right = (i32::from(cd_right) * i32::from(psx.spu.cd_volume_right)) >> 15;
@@ -799,7 +803,7 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
     // This is important if the IRQ is enabled since it means that it would trigger a bit earlier
     // when the block is read.
     //
-    // This is still not entirely cycle accurate, so we could be improved further with more
+    // This is still not entirely cycle accurate, so it could be further improved with more
     // testing. Mednafen's codebase has a few comments giving hints on what could be done. More
     // testing required.
     if psx.spu[voice].decoder_fifo.len() >= 11 {
@@ -832,7 +836,7 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
         if psx.spu.irq_enabled() {
             // Test current address
             check_for_irq(psx, psx.spu[voice].cur_index);
-            // This is taken from mednafen, not shure why it's necessary
+            // This is taken from mednafen, not sure why it's necessary
             check_for_irq(psx, psx.spu[voice].cur_index & 0x3_fff8);
         }
 
