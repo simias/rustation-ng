@@ -516,6 +516,7 @@ pub mod hw_context {
     use super::{call_environment_mut, Environment};
     use libc::{c_char, c_uint, c_void, uintptr_t};
     use std::ffi::CString;
+    use std::ptr::addr_of_mut;
 
     pub type ResetFn = extern "C" fn();
 
@@ -583,7 +584,7 @@ pub mod hw_context {
     };
 
     pub fn init() -> bool {
-        unsafe { call_environment_mut(Environment::SetHwRender, &mut STATIC_HW_CONTEXT) }
+        unsafe { call_environment_mut(Environment::SetHwRender, addr_of_mut!(STATIC_HW_CONTEXT)) }
     }
 
     pub fn get_proc_address(sym: &str) -> *const c_void {
@@ -1064,8 +1065,8 @@ pub unsafe fn register_variables(variables: &[Variable]) -> bool {
     call_environment_slice(Environment::SetVariables, variables)
 }
 
-unsafe fn call_environment_mut<T>(which: Environment, var: &mut T) -> bool {
-    ENVIRONMENT(which as c_uint, var as *mut _ as *mut c_void)
+unsafe fn call_environment_mut<T>(which: Environment, var: *mut T) -> bool {
+    ENVIRONMENT(which as c_uint, var as *mut c_void)
 }
 
 unsafe fn call_environment<T>(which: Environment, var: &T) -> bool {

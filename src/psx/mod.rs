@@ -186,8 +186,8 @@ impl Psx {
         sync::rebase_counters(self);
     }
 
-    pub fn last_frame(&mut self) -> &Frame {
-        self.gpu.last_frame()
+    pub fn take_frame(&mut self) -> Option<Frame> {
+        self.gpu.take_frame()
     }
 
     /// Get pending audio samples since the last call to `clear_audio_samples`

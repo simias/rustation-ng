@@ -7,7 +7,9 @@ pub mod iso9660;
 use super::{irq, Addressable, Psx};
 use crate::error::{PsxError, Result};
 use crate::sha::sha256;
+pub use cdc::CdcState;
 pub use cdc::MC68HC05_ROM_DUMP_SIZE as CDC_ROM_SIZE;
+use cdimage::DiscPosition;
 use disc::Disc;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -72,6 +74,18 @@ impl CdInterface {
 
     pub fn load_disc(&mut self, disc: Disc) {
         self.cdc.load_disc(disc)
+    }
+
+    pub fn state(&self) -> CdcState {
+        self.cdc.state()
+    }
+
+    pub fn disc_speed(&self) -> u8 {
+        self.cdc.disc_speed()
+    }
+
+    pub fn sled_position(&self) -> DiscPosition {
+        self.cdc.position()
     }
 }
 

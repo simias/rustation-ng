@@ -141,6 +141,23 @@ impl Uc {
         uc
     }
 
+    /// Return the value of the STAT byte from RAM. Of course this is firmware-dependant.
+    fn get_stat(&self) -> u8 {
+        self.memory[0xbc]
+    }
+
+    pub fn is_playing_audio(&self) -> bool {
+        self.get_stat() & (1 << 7) != 0
+    }
+
+    pub fn is_seeking(&self) -> bool {
+        self.get_stat() & (1 << 6) != 0
+    }
+
+    pub fn is_reading_data(&self) -> bool {
+        self.get_stat() & (1 << 5) != 0
+    }
+
     pub fn set_shell_open(&mut self, opened: bool) {
         // Pin 3 is "DOOR", set to 1 when the door is opened
         if opened {
@@ -148,6 +165,10 @@ impl Uc {
         } else {
             self.io_ports[1].input &= !(1 << 3);
         }
+    }
+
+    pub fn is_shell_open(&self) -> bool {
+        (self.io_ports[1].input & (1 << 3)) != 0
     }
 
     /// Set the state of the lmsw input that's connected to a switch at the inner limit of the CD

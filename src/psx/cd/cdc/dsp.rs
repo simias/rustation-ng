@@ -175,8 +175,12 @@ impl Dsp {
     }
 
     /// Returns true if the configured disc speed is 2x, false if it's 1x.
-    fn is_speed_2x(&self) -> bool {
+    pub fn is_speed_2x(&self) -> bool {
         self.dspb
+    }
+
+    pub fn position(&self) -> DiscPosition {
+        self.position
     }
 
     /// Build the SCEx license string for the given region. If region is None we won't send a

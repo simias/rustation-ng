@@ -142,7 +142,7 @@ impl Gpu {
         self.video_standard
     }
 
-    pub fn last_frame(&mut self) -> &Frame {
+    pub fn take_frame(&mut self) -> Option<Frame> {
         // If we were waiting for a VRAM read we must fetch it before attempting to recover a
         // frame, otherwise we'll receive the VRAM read from the rasterizer and think that it's a
         // frame...
@@ -151,7 +151,7 @@ impl Gpu {
             self.state = State::VRamLoad(Some((frame, 0)));
         }
 
-        self.rasterizer.last_frame()
+        self.rasterizer.take_frame()
     }
 
     pub fn set_rasterizer_option(&mut self, opt: RasterizerOption) {

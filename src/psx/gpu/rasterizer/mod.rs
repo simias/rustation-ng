@@ -10,17 +10,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::mpsc;
 use std::thread;
 
-enum LastFrame {
-    /// We asked the rasterizer to provide a frame and we're waiting for it on the `frame_channel`
-    Pending,
-    /// The last frame we've received
-    Frame(Frame),
-}
-
 /// This is the handle used from the main thread to communicate with the rasterizer
 pub struct Handle {
     command_buffer: CommandBuffer,
-    last_frame: LastFrame,
+    frame_pending: bool,
     handle: Option<thread::JoinHandle<()>>,
     command_channel: mpsc::Sender<CommandBuffer>,
     frame_channel: mpsc::Receiver<Frame>,
@@ -69,11 +62,11 @@ impl Handle {
         self.flush_command_buffer();
 
         // Make sure we were not already waiting for a frame
-        self.last_frame();
+        self.take_frame();
 
         // Instead of blocking immediately waiting for the frame let's just save the fact that we
         // asked for a frame
-        self.last_frame = LastFrame::Pending;
+        self.frame_pending = true;
     }
 
     pub fn set_option(&mut self, opt: RasterizerOption) {
@@ -81,17 +74,12 @@ impl Handle {
         self.flush_command_buffer();
     }
 
-    pub fn last_frame(&mut self) -> &Frame {
-        match self.last_frame {
-            LastFrame::Pending => {
-                let frame = self.frame_channel.recv().unwrap();
-
-                self.last_frame = LastFrame::Frame(frame);
-
-                // Recursively call this function because why not
-                self.last_frame()
-            }
-            LastFrame::Frame(ref f) => f,
+    pub fn take_frame(&mut self) -> Option<Frame> {
+        if self.frame_pending {
+            self.frame_pending = false;
+            Some(self.frame_channel.recv().unwrap())
+        } else {
+            None
         }
     }
 
@@ -188,12 +176,10 @@ pub fn start_from_state(command_buffer: CommandBuffer, mut rasterizer: Rasterize
         })
         .unwrap();
 
-    let dummy_frame = Frame::new(0, 0);
-
     Handle {
         command_buffer,
-        last_frame: LastFrame::Frame(dummy_frame),
         handle: Some(handle),
+        frame_pending: false,
         command_channel: command_sender,
         frame_channel: frame_receiver,
         serialization_channel: serialization_receiver,

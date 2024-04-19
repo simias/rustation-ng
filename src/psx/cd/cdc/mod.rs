@@ -7,7 +7,7 @@ mod uc;
 
 use super::Disc;
 use crate::PsxError;
-use cdimage::Sector;
+use cdimage::{DiscPosition, Sector};
 pub use uc::ROM_DUMP_SIZE as MC68HC05_ROM_DUMP_SIZE;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -21,6 +21,8 @@ pub struct Cdc {
     /// a little to make sure that the controller has the time to register the disc switch.
     #[serde(default)]
     shell_close_delay: Option<u32>,
+    #[serde(default)]
+    effective_speed: u8,
 }
 
 impl Cdc {
@@ -34,6 +36,7 @@ impl Cdc {
             disc,
             loading_speed: 2,
             shell_close_delay: None,
+            effective_speed: 1,
         };
 
         // I start with the sled at some location on the disc to simulate the case where the
@@ -135,6 +138,11 @@ impl Cdc {
             1
         };
 
+        self.effective_speed = cycles_to_run;
+        if self.decoder.is_double_speed() {
+            self.effective_speed *= 2;
+        }
+
         match self.shell_close_delay {
             None => (),
             Some(c) if c <= u32::from(cycles_to_run) => {
@@ -223,6 +231,36 @@ impl Cdc {
     pub fn copy_rom(&mut self, source: &Cdc) {
         self.uc.copy_rom(&source.uc)
     }
+
+    pub fn state(&self) -> CdcState {
+        if self.uc.is_shell_open() {
+            CdcState::ShellOpen
+        } else if self.disc.is_none() {
+            CdcState::NoDisc
+        } else if self.uc.is_seeking() {
+            CdcState::Seeking
+        } else if self.uc.is_playing_audio() {
+            CdcState::AudioStreaming
+        } else if self.uc.is_reading_data() {
+            CdcState::DataStreaming
+        } else {
+            CdcState::Idle
+        }
+    }
+
+    /// Returns the disc speed (1 for standard CD-DA speed)
+    pub fn disc_speed(&self) -> u8 {
+        if self.uc.is_shell_open() || self.disc.is_none() {
+            0
+        } else {
+            self.effective_speed
+        }
+    }
+
+    /// Current sled position on the disc
+    pub fn position(&self) -> DiscPosition {
+        self.dsp.position()
+    }
 }
 
 /// Convert a delay in microseconds into a number of 44.1kHz audio cycles with rounding
@@ -234,4 +272,27 @@ const fn us_to_audio_cycles(us: u32) -> u32 {
     debug_assert!(s > 0);
 
     s as u32
+}
+
+/// Possible states for the CD drive
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CdcState {
+    /// Shell is open
+    ShellOpen,
+    /// No disc loaded
+    NoDisc,
+    /// Disc is loaded but not actively in-use
+    Idle,
+    /// A seek is in progress
+    Seeking,
+    /// Disc is streaming audio
+    AudioStreaming,
+    /// Disc is streaming data
+    DataStreaming,
+}
+
+impl CdcState {
+    pub fn is_idle(self) -> bool {
+        matches!(self, CdcState::Idle)
+    }
 }

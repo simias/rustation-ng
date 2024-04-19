@@ -29,11 +29,11 @@ pub struct Decoder {
     hadr: u16,
     /// Host address counter
     hadrc: u16,
-    /// Host tranfer
+    /// Host transfer
     hxfr: u16,
-    /// Host tranfer counter
+    /// Host transfer counter
     hxfrc: u16,
-    /// Disable host tranfer counter
+    /// Disable host transfer counter
     dishxfrc: bool,
     /// Writing to the RAM buffer is stopped
     write_stopped: bool,

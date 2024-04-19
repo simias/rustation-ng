@@ -60,6 +60,7 @@ use error::{PsxError, Result};
 use memory_card::MemoryCardFile;
 use psx::bios::Metadata;
 use psx::bios::{Bios, BIOS_SIZE};
+use psx::cd::CdcState;
 use psx::disc::Disc;
 use psx::gpu::RasterizerOption;
 use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock};
@@ -111,6 +112,10 @@ struct Context {
     analog_combo: AnalogCombo,
     /// Ratio to match the analog deadzone of the emulator's controller to that of a real DualShock
     analog_compensation: f32,
+    /// CD state overlay mode
+    cd_overlay: CdOverlay,
+    /// Current position of the CD spin indicator
+    cd_spin_pos: f32,
 }
 
 impl Context {
@@ -134,6 +139,8 @@ impl Context {
             aspect_ratio: 4. / 3.,
             analog_combo: AnalogCombo::SelectR3,
             analog_compensation: 1.,
+            cd_overlay: CdOverlay::Disabled,
+            cd_spin_pos: 0.,
         };
 
         libretro::Context::refresh_variables(&mut ctx);
@@ -414,7 +421,31 @@ impl Context {
     }
 
     fn output_frame(&mut self) {
-        let mut frame = self.psx.last_frame();
+        let draw_cd_state = match self.cd_overlay {
+            CdOverlay::Disabled => None,
+            CdOverlay::Enabled => Some((
+                self.psx.cd.state(),
+                self.psx.cd.disc_speed(),
+                self.psx.cd.sled_position(),
+            )),
+            CdOverlay::Dynamic => {
+                let state = self.psx.cd.state();
+
+                if state.is_idle() {
+                    None
+                } else {
+                    Some((state, self.psx.cd.disc_speed(), self.psx.cd.sled_position()))
+                }
+            }
+        };
+
+        let mut frame = match self.psx.take_frame() {
+            Some(f) => f,
+            None => {
+                error!("No frame generated!");
+                return;
+            }
+        };
 
         if frame.width != self.internal_width || frame.height != self.internal_height {
             // Internal resolution changed, see if we need to adjust the geometry
@@ -432,7 +463,100 @@ impl Context {
                 self.aspect_ratio = geom.aspect_ratio;
                 libretro::set_geometry(&geom);
             }
-            frame = self.psx.last_frame();
+        }
+
+        if let Some((state, speed, disc_pos)) = draw_cd_state {
+            use crate::psx::gpu::Pixel;
+
+            // Draw the disc state indicator
+            let dim = std::cmp::min(frame.width / 10, frame.height);
+            let x_off = dim;
+            let y_off = dim;
+
+            // Disc circle
+            let r = dim / 2 - 1;
+            let x_center = x_off + dim / 2;
+            let y_center = y_off + dim / 2;
+
+            let mut draw_pixel = |x: u32, y: u32, color: Pixel| {
+                frame.pixels[(y * frame.width + x) as usize] = color.to_rgb888();
+            };
+
+            let col = match state {
+                CdcState::ShellOpen => Pixel::from_rgb(0x84, 0x60, 0x1d),
+                CdcState::NoDisc => Pixel::from_rgb(0x84, 0x2e, 0x1d),
+                CdcState::Idle => Pixel::from_rgb(0x4a, 0x4a, 0x4a),
+                CdcState::Seeking => Pixel::from_rgb(0xaf, 0xad, 0x2d),
+                CdcState::AudioStreaming => Pixel::from_rgb(0x11, 0x87, 0x23),
+                CdcState::DataStreaming => Pixel::from_rgb(0x9a, 0x2d, 0xaf),
+            };
+
+            // Draw the circle using Bresenham's algo
+            {
+                // Start from the top
+                let mut x = 0;
+                let mut y = r;
+                let mut d = 3 - 2 * (r as i32);
+
+                let mut draw_octants = |x, y| {
+                    draw_pixel(x_center + x, y_center + y, col);
+                    draw_pixel(x_center + x, y_center - y, col);
+                    draw_pixel(x_center - x, y_center + y, col);
+                    draw_pixel(x_center - x, y_center - y, col);
+                    draw_pixel(x_center + y, y_center + x, col);
+                    draw_pixel(x_center + y, y_center - x, col);
+                    draw_pixel(x_center - y, y_center + x, col);
+                    draw_pixel(x_center - y, y_center - x, col);
+                };
+
+                draw_octants(x, y);
+
+                while x < y {
+                    x = x + 1;
+                    if d > 0 {
+                        y = y - 1;
+                        d = d + 4 * ((x as i32) - (y as i32)) + 10;
+                    } else {
+                        d = d + 4 * (x as i32) + 6;
+                    }
+                    draw_octants(x, y);
+                }
+            }
+
+            // Draw the spin/position indicator
+            if state != CdcState::ShellOpen && state != CdcState::NoDisc {
+                use std::f32::consts::PI;
+
+                // Linear speed: 75 * speed frames (sectors) per second
+                let linear_speed_mm =
+                    cdimage::disc_position::CD_FRAME_LENGTH_MM * 75 * (speed as u32);
+                let radius_mm = disc_pos.disc_radius().map(|r| r.to_millis()).unwrap_or(1.);
+
+                // Relative position on the disc
+                let mut pos_rel =
+                    radius_mm / cdimage::disc_position::CD_PROGRAM_RADIUS_MAX.to_millis();
+
+                if pos_rel > 1.0 {
+                    pos_rel = 1.0;
+                }
+
+                let rps = (linear_speed_mm as f32) / (radius_mm * PI * 2.);
+                // We divide by 10 because otherwise the spin speed is too fast for the framerate
+                // That means that the spin indicator is 5 times slower than real time
+                self.cd_spin_pos += (rps / self.video_output_framerate()) / 5.;
+                self.cd_spin_pos = self.cd_spin_pos.fract();
+
+                let rads = self.cd_spin_pos * PI * 2.;
+
+                let x = ((x_center as f32) + ((r as f32) * rads.cos() * pos_rel).round()) as u32;
+                let y = ((y_center as f32) + ((r as f32) * rads.sin() * pos_rel).round()) as u32;
+
+                draw_pixel(x, y, col);
+                draw_pixel(x + 1, y, col);
+                draw_pixel(x - 1, y, col);
+                draw_pixel(x, y + 1, col);
+                draw_pixel(x, y - 1, col);
+            }
         }
 
         libretro::frame_done(&frame.pixels, frame.width, frame.height);
@@ -530,6 +654,7 @@ impl libretro::Context for Context {
     fn refresh_variables(&mut self) {
         self.analog_combo = options::CoreOptions::analog_combo();
         self.analog_compensation = options::CoreOptions::analog_compensation();
+        self.cd_overlay = options::CoreOptions::cd_overlay();
 
         let vram_display_mode = options::CoreOptions::display_full_vram();
         self.psx
@@ -622,7 +747,7 @@ impl libretro::Context for Context {
 
         // Make sure that we don't have anything "stuck" in our rasterizer channels since otherwise
         // it won't be correctly serialized.
-        let _frame = self.psx.last_frame();
+        let _frame = self.psx.take_frame();
 
         let mut fb = flexbuffers::FlexbufferSerializer::new();
 
@@ -959,10 +1084,20 @@ impl VRamDisplayMode {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[repr(u8)]
+pub enum CdOverlay {
+    #[default]
+    Disabled,
+    Enabled,
+    /// Overlay enabled only when CD is active
+    Dynamic,
+}
+
 mod options {
     //! Core options
 
-    use super::{AnalogCombo, VRamDisplayMode};
+    use super::{AnalogCombo, CdOverlay, VRamDisplayMode};
     use std::str::FromStr;
 
     #[derive(PartialEq, Eq)]
@@ -995,6 +1130,8 @@ mod options {
             => "GTE overclock; disabled|enabled";
         cd_speed: u8, parse_u8
             => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
+        cd_overlay: CdOverlay, parse_cd_overlay
+            => "CD overlay; disabled|enabled|dynamic";
         reverb_enable: bool, parse_bool
             => "Enable audio reverberation; enabled|disabled";
         analog_combo: AnalogCombo, parse_analog_combo
@@ -1075,6 +1212,17 @@ mod options {
             "16bpp" => VRamDisplayMode::Full16bpp,
             "8bpp" => VRamDisplayMode::Full8bpp,
             "4bpp" => VRamDisplayMode::Full4bpp,
+            _ => return Err(()),
+        };
+
+        Ok(mode)
+    }
+
+    fn parse_cd_overlay(opt: &str) -> Result<CdOverlay, ()> {
+        let mode = match opt {
+            "disabled" => CdOverlay::Disabled,
+            "enabled" => CdOverlay::Enabled,
+            "dynamic" => CdOverlay::Dynamic,
             _ => return Err(()),
         };
 
