@@ -7,11 +7,13 @@ pub trait Bitwise {
     fn set_bit(&mut self, bitpos: u8, v: bool);
 
     /// Sets the given bit in self to 1
+    #[test]
     fn set_bit_h(&mut self, bitpos: u8) {
         self.set_bit(bitpos, true)
     }
 
     /// Sets the given bit in self to 0
+    #[test]
     fn set_bit_l(&mut self, bitpos: u8) {
         self.set_bit(bitpos, false)
     }

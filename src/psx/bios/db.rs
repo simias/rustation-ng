@@ -22,9 +22,11 @@ pub struct Metadata {
     ///
     /// This value can be set to `None` if the correct address has not been determined for this
     /// particular BIOS.
+    #[allow(dead_code)]
     pub animation_jump_hook: Option<u32>,
     /// Method used to patch the BIOS to enable the debug UART or `None` if the method hasn't been
     /// found.
+    #[allow(dead_code)]
     pub patch_debug_uart: Option<fn(&mut Bios)>,
 }
 

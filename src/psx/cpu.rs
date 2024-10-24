@@ -3,7 +3,10 @@
 //! The timings code is copied from mednafen
 
 use super::cop0::Exception;
-use super::{cop0, debugger, map, AccessWidth, Addressable, CycleCount, Psx};
+use super::{cop0, map, AccessWidth, Addressable, CycleCount, Psx};
+
+#[cfg(feature = "debugger")]
+use super::debugger;
 
 use std::fmt;
 
@@ -268,7 +271,10 @@ pub fn run_next_instruction(psx: &mut Psx) {
     psx.cpu.branch = false;
 
     // Debugger entrypoint: used for code breakpoints and stepping
-    debugger::pc_change(psx);
+    #[cfg(feature = "debugger")]
+    {
+        debugger::pc_change(psx);
+    }
 
     if psx.cpu.current_pc % 4 != 0 {
         // PC is not correctly aligned!
@@ -428,7 +434,10 @@ fn store<T: Addressable>(psx: &mut Psx, addr: u32, v: T) {
         return;
     }
 
-    debugger::memory_write(psx, addr);
+    #[cfg(feature = "debugger")]
+    {
+        debugger::memory_write(psx, addr);
+    }
 
     psx.store(addr, v);
 }
@@ -439,7 +448,10 @@ fn load<T: Addressable>(psx: &mut Psx, addr: u32, from_lwc: bool) -> (T, u8) {
     // Any pending load must terminate before we attempt to start a new one
     psx.cpu.load_sync();
 
-    debugger::memory_read(psx, addr);
+    #[cfg(feature = "debugger")]
+    {
+        debugger::memory_read(psx, addr);
+    }
 
     // The Scratch Pad is the CPU data cache, it therefore has very low latency and needs to be
     // special-cased
@@ -621,12 +633,15 @@ fn op_syscall(psx: &mut Psx, _: Instruction) {
 
 /// Break
 fn op_break(psx: &mut Psx, _: Instruction) {
-    if psx.cpu.debug_on_break {
-        info!("BREAK instruction while debug_on_break is active");
-        debugger::trigger_break(psx);
-    } else {
-        exception(psx, Exception::Break);
+    #[cfg(feature = "debugger")]
+    {
+        if psx.cpu.debug_on_break {
+            info!("BREAK instruction while debug_on_break is active");
+            debugger::trigger_break(psx);
+            return;
+        }
     }
+    exception(psx, Exception::Break);
 }
 
 /// Block if the current DIV(U) or MULT(U) instruction has not yet finished

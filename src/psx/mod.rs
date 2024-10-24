@@ -4,6 +4,7 @@ pub mod bios;
 pub mod cd;
 pub mod cop0;
 pub mod cpu;
+#[cfg(feature = "debugger")]
 pub mod debugger;
 mod dma;
 pub mod gpu;
