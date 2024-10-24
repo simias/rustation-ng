@@ -400,6 +400,9 @@ impl Context {
         let (w, h) = vram_display_mode.max_resolution();
         let aspect_ratio = vram_display_mode.aspect_ratio();
 
+        let w = w as u32;
+        let h = h as u32;
+
         let max_width;
         let max_height;
         if w <= 640 && h <= 576 {
@@ -1062,7 +1065,7 @@ pub enum VRamDisplayMode {
 }
 
 impl VRamDisplayMode {
-    fn max_resolution(self) -> (u32, u32) {
+    fn max_resolution(self) -> (u16, u16) {
         match self {
             // Maximum resolution supported by the PlayStation video output is 640x576. That high a
             // vertical resolution would mean no blanking however, so it doesn't make a lot of

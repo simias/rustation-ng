@@ -10,13 +10,15 @@ use crate::psx::gpu::commands::{vram_access_dimensions, Shaded};
 use crate::psx::gpu::commands::{NoShading, Position, Transparent};
 use crate::psx::gpu::commands::{NoTexture, Opaque, ShadingMode, TextureBlending, TextureRaw};
 use crate::psx::gpu::commands::{TextureMode, TransparencyMode};
-use crate::BoxArray;
 use crate::VRamDisplayMode;
 
 use crate::psx::gpu::{DisplayMode, DrawMode, MaskSettings, TextureWindow, TransparencyFunction};
 use fixed_point::{FpCoord, FpVar};
+use serde::de::{self, Deserialize, Deserializer, SeqAccess, Visitor};
+use serde::ser::{Serialize, SerializeTuple, Serializer};
 use std::cmp::{max, min};
 use std::fmt;
+use std::marker::PhantomData;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 enum State {
@@ -31,7 +33,7 @@ enum State {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Rasterizer {
-    vram: BoxArray<Pixel, VRAM_PIXELS>,
+    vram: VRam,
     state: State,
     /// Frame currently being drawn
     #[serde(skip)]
@@ -106,7 +108,7 @@ pub struct Rasterizer {
 impl Rasterizer {
     pub fn new() -> Rasterizer {
         Rasterizer {
-            vram: BoxArray::from_vec(vec![Pixel::black(); 1024 * 512]),
+            vram: VRam::new(),
             state: State::WaitingForCommand,
             cur_frame: Frame::new(0, 0),
             clip_x_min: 0,
@@ -209,11 +211,15 @@ impl Rasterizer {
                                 let p1 = Pixel::from_mbgr1555((*v >> 16) as u16);
 
                                 for &p in [p0, p1].iter() {
-                                    let vram_off = store.target_vram_offset();
+                                    let (x, y) = store.target_vram_offset();
 
-                                    let target = &mut self.vram[vram_off];
-                                    if self.mask_settings.can_draw_to(*target) {
-                                        *target = self.mask_settings.mask(p);
+                                    let target = self.vram.native_pixel(x, y);
+                                    if self.mask_settings.can_draw_to(target) {
+                                        self.vram.set_native_pixel(
+                                            x,
+                                            y,
+                                            self.mask_settings.mask(p),
+                                        );
                                     }
 
                                     if store.next().is_none() {
@@ -318,7 +324,20 @@ impl Rasterizer {
             }
             RasterizerOption::Wireframe(v) => self.draw_wireframe = v,
             RasterizerOption::DrawPolygons(v) => self.draw_polygons = v,
+            RasterizerOption::UpscaleShift(v) => self.set_upscale_shift(v),
         }
+    }
+
+    pub fn set_upscale_shift(&mut self, upscale_shift: u8) {
+        if self.vram.upscale_shift == upscale_shift {
+            return;
+        }
+        // let vram_1x = if self.upscale_shift == 0 {
+        //     self.vram;
+        // }
+        //
+        // self.upscale_shift = upscale_shift
+        todo!()
     }
 
     /// Called when we should output a line to the output buffer
@@ -464,37 +483,41 @@ impl Rasterizer {
                 // It's possible for this to fail if `vram_display_mode` was just switched and the
                 // current frame doesn't have the proper dimensions. In this case we're going to return
                 // a partially drawn leftover frame which is probably not too important.
-                if self.cur_frame.width >= w && self.cur_frame.height >= h {
-                    for i in 0..((w * h) as usize) {
-                        self.cur_frame.pixels[i] = match mode {
-                            VRamDisplayMode::Native => unreachable!(),
-                            VRamDisplayMode::Full16bpp => self.vram[i].to_rgb888(),
-                            VRamDisplayMode::Full8bpp => {
-                                let p = self.vram[i >> 1].vram_bytes();
+                if self.cur_frame.width >= u32::from(w) && self.cur_frame.height >= u32::from(h) {
+                    for y in 0..h {
+                        for x in 0..w {
+                            self.cur_frame.pixels[usize::from(y * w + x)] = match mode {
+                                VRamDisplayMode::Native => unreachable!(),
+                                VRamDisplayMode::Full16bpp => {
+                                    self.vram.native_pixel(x, y).to_rgb888()
+                                }
+                                VRamDisplayMode::Full8bpp => {
+                                    let p = self.vram.native_pixel(x >> 1, y).vram_bytes();
 
-                                let g = p[i & 1];
+                                    let g = p[usize::from(x & 1)];
 
-                                Pixel::from_rgb(g, g, g).0
-                            }
-                            VRamDisplayMode::Full4bpp => {
-                                let p = self.vram[i >> 2].to_mbgr1555();
-                                let n = [
-                                    (p & 0xf) as u8,
-                                    ((p >> 4) & 0xf) as u8,
-                                    ((p >> 8) & 0xf) as u8,
-                                    ((p >> 12) & 0xf) as u8,
-                                ];
+                                    Pixel::from_rgb(g, g, g).0
+                                }
+                                VRamDisplayMode::Full4bpp => {
+                                    let p = self.vram.native_pixel(x >> 2, y).to_mbgr1555();
+                                    let n = [
+                                        (p & 0xf) as u8,
+                                        ((p >> 4) & 0xf) as u8,
+                                        ((p >> 8) & 0xf) as u8,
+                                        ((p >> 12) & 0xf) as u8,
+                                    ];
 
-                                let g = n[i & 3];
-                                let g = g | g << 4;
+                                    let g = n[usize::from(x & 3)];
+                                    let g = g | g << 4;
 
-                                Pixel::from_rgb(g, g, g).0
-                            }
-                        };
+                                    Pixel::from_rgb(g, g, g).0
+                                }
+                            };
+                        }
                     }
                 }
 
-                (w, h)
+                (u32::from(w), u32::from(h))
             }
         };
 
@@ -513,23 +536,17 @@ impl Rasterizer {
     /// Create a new frame with the given `width` and `height` and containing the pixels in the VRAM
     /// region locatied at `left`x`top`. Used to implement VRAM reads
     fn copy_vram_rect(&mut self, left: u16, top: u16, width: u16, height: u16) -> Frame {
-        let left = left as u32;
-        let top = top as u32;
-        let height = height as u32;
-        let width = width as u32;
-
-        let mut frame = Frame::new(width, height);
+        let mut frame = Frame::new(u32::from(width), u32::from(height));
 
         for y in 0..height {
-            let y_off = ((top + y) & 0x1ff) * 1024;
+            let vram_y = (top + y) & 0x1ff;
             for x in 0..width {
-                let x_off = (left + x) & 0x3ff;
-                let vram_pos = y_off + x_off;
+                let vram_x = (left + x) & 0x3ff;
 
-                let p = self.vram[vram_pos as usize];
+                let p = self.vram.native_pixel(vram_x, vram_y);
                 // XXX I reuse Frame here for simplicity but since VRAM loads are 16 bits we waste
                 // half the storage here.
-                frame.set_pixel(x, y, p.to_mbgr1555() as u32);
+                frame.set_pixel(u32::from(x), u32::from(y), u32::from(p.to_mbgr1555()));
             }
         }
 
@@ -619,10 +636,10 @@ impl Rasterizer {
         debug_assert!((0..1024).contains(&x), "x out of bounds ({})", x);
         debug_assert!((0..1024).contains(&y), "y out of bounds ({})", y);
 
-        let y = y & 0x1ff;
-        let vram_off = y * 1024 + x;
+        let y = (y & 0x1ff) as u32;
+        let x = x as u32;
 
-        self.vram[vram_off as usize]
+        self.vram.pixel(x, y)
     }
 
     fn draw_pixel<Transparency, Texture>(&mut self, x: i32, y: i32, mut color: Pixel)
@@ -635,13 +652,12 @@ impl Rasterizer {
 
         // Apparently the PlayStation GPU supports 2MB VRAM (1024x1024, used in some arcade
         // machines apparently) but the bottom half isn't installed so it wraps around.
-        let y = y & 0x1ff;
+        let y = (y & 0x1ff) as u32;
+        let x = x as u32;
 
-        let vram_off = y * 1024 + x;
+        let bg_pixel = self.vram.pixel(x, y);
 
-        let vram_pixel = &mut self.vram[vram_off as usize];
-
-        if !self.mask_settings.can_draw_to(*vram_pixel) {
+        if !self.mask_settings.can_draw_to(bg_pixel) {
             // Masked
             return;
         }
@@ -652,7 +668,6 @@ impl Rasterizer {
             Transparency::is_transparent() && (!Texture::is_textured() || color.mask());
 
         if is_transparent {
-            let bg_pixel = *vram_pixel;
             let mode = self.tex_mapper.draw_mode.transparency_mode();
 
             // XXX if we wanted to be extra-accurate we might want to truncate the color here to
@@ -665,14 +680,12 @@ impl Rasterizer {
                 color.set_mask();
             }
         } else if self.force_transparency {
-            let bg_pixel = *vram_pixel;
-
             color.apply_transparency(bg_pixel, TransparencyFunction::Average);
         }
 
         color = self.mask_settings.mask(color);
 
-        *vram_pixel = color;
+        self.vram.set_pixel(x, y, color);
     }
 
     fn draw_triangle<Transparency, Texture, Shading>(&mut self, mut vertices: [Vertex; 3])
@@ -1637,7 +1650,7 @@ impl TextureMapper {
         }
     }
 
-    pub fn set_clut(&mut self, clut: u32, vram: &[Pixel; 1024 * 512]) {
+    pub fn set_clut(&mut self, clut: u32, vram: &VRam) {
         let pts = self.pixel_to_texel_shift as u32;
         if pts == 0 {
             // We're in "truecolor" mode, the palette is not in use
@@ -1656,13 +1669,13 @@ impl TextureMapper {
 
         self.clut_tag = tag;
 
-        let clut_x = (clut & 0x3f) << 4;
-        let clut_y = (clut >> 6) & 0x1ff;
+        let clut_x = ((clut & 0x3f) << 4) as u16;
+        let clut_y = ((clut >> 6) & 0x1ff) as u16;
 
-        let clut_off = (clut_y * 1024 + clut_x) as usize;
+        // let clut_off = (clut_y * 1024 + clut_x) as usize;
 
         // 256 for 8bpp, 16 for 4bpp
-        let nentries = 256 >> ((pts - 1) * 4);
+        let nentries = 256u16 >> ((pts - 1) * 4);
 
         // Dino Crisis 2 sets a weird palette when displaying the Superintendent hologram:
         //
@@ -1671,7 +1684,7 @@ impl TextureMapper {
         // Naturally this goes out of bounds, but I presume that we're supposed to wrap around (not
         // tested on real hardware)
         for i in 0..nentries {
-            self.clut_cache[i] = vram[(clut_off + i) % (1024 * 512)];
+            self.clut_cache[i as usize] = vram.native_pixel((clut_x + i) & 0x3ff, clut_y)
         }
     }
 
@@ -1717,7 +1730,7 @@ impl TextureMapper {
         self.v_offset += tp_y;
     }
 
-    pub fn get_texel(&mut self, u: u8, v: u8, vram: &[Pixel; 1024 * 512]) -> Pixel {
+    pub fn get_texel(&mut self, u: u8, v: u8, vram: &VRam) -> Pixel {
         let pts = u16::from(self.pixel_to_texel_shift);
         let fb_u = u16::from(u & self.u_mask) + self.u_offset;
         let fb_v = u16::from(v & self.v_mask) + self.v_offset;
@@ -1741,19 +1754,18 @@ impl TextureMapper {
 
         let cacheline = &mut self.texture_cache[usize::from(cache_index)];
 
-        let fb_off = u32::from(fb_y) * 1024 + u32::from(fb_x);
-        let tag = fb_off & !3;
+        let tag = (u32::from(fb_y) * 1024 + u32::from(fb_x)) & !3;
 
         if cacheline.tag != tag {
             // Need to fetch the cacheline
             cacheline.tag = tag;
 
-            let tag = tag as usize;
-
-            cacheline.pixels.copy_from_slice(&vram[tag..(tag + 4)])
+            for i in 0..4u16 {
+                cacheline.pixels[usize::from(i)] = vram.native_pixel((fb_x & !3) + i, fb_y);
+            }
         }
 
-        let raw = cacheline.pixels[(fb_off & 3) as usize];
+        let raw = cacheline.pixels[usize::from(fb_x & 3)];
 
         if pts == 0 {
             // True color mode, we return the texture value as-is
@@ -2365,11 +2377,11 @@ impl VRamStore {
         }
     }
 
-    fn target_vram_offset(&self) -> usize {
-        let x = (self.x & 0x3ff) as usize;
-        let y = (self.y & 0x1ff) as usize;
+    fn target_vram_offset(&self) -> (u16, u16) {
+        let x = self.x & 0x3ff;
+        let y = self.y & 0x1ff;
 
-        y * 1024 + x
+        (x, y)
     }
 
     fn next(&mut self) -> Option<()> {
@@ -2475,11 +2487,11 @@ fn cmd_fill_rect(rasterizer: &mut Rasterizer, params: &[u32]) {
     let dst = params[1];
     let dim = params[2];
 
-    let start_x = dst & 0x3f0;
-    let start_y = (dst >> 16) & 0x3ff;
+    let start_x = (dst & 0x3f0) as u16;
+    let start_y = ((dst >> 16) & 0x3ff) as u16;
 
-    let width = ((dim & 0x3ff) + 0xf) & !0xf;
-    let height = (dim >> 16) & 0x1ff;
+    let width = (((dim & 0x3ff) + 0xf) & !0xf) as u16;
+    let height = ((dim >> 16) & 0x1ff) as u16;
 
     // XXX Pretty sure there's no dithering for this commands
     let color = rasterizer.truncate_color(color);
@@ -2497,8 +2509,7 @@ fn cmd_fill_rect(rasterizer: &mut Rasterizer, params: &[u32]) {
             // XXX Probably worth adding a test just in case.
             let x_pos = (start_x + x) & 1023;
 
-            let vram_index = y_pos * 1024 + x_pos;
-            rasterizer.vram[vram_index as usize] = color;
+            rasterizer.vram.set_native_pixel(x_pos, y_pos, color);
         }
     }
 }
@@ -3599,9 +3610,6 @@ pub static GP0_COMMANDS: [CommandHandler; 0x100] = [
     },
 ];
 
-/// Total number of pixels in the VRAM
-const VRAM_PIXELS: usize = 1024 * 512;
-
 mod serialize_dither_table {
     use serde::{de::Deserializer, ser::Serializer};
 
@@ -3640,5 +3648,114 @@ impl CacheLine {
 
     fn invalidate(&mut self) {
         self.tag = CacheLine::TAG_INVALID;
+    }
+}
+
+struct VRam {
+    pixels: Vec<Pixel>,
+    /// Upscale shift value. 0 for native.
+    upscale_shift: u8,
+}
+
+impl VRam {
+    fn new() -> VRam {
+        VRam {
+            pixels: vec![Pixel::black(); 1024 * 512],
+            upscale_shift: 0,
+        }
+    }
+
+    /// Returns the pixel at x, y where x an y are in native 1x coordinates.
+    fn native_pixel(&self, x: u16, y: u16) -> Pixel {
+        self.pixel(
+            u32::from(x) << self.upscale_shift,
+            u32::from(y) << self.upscale_shift,
+        )
+    }
+
+    /// Sets the pixel at x, y where x an y are in native 1x coordinates.
+    fn set_native_pixel(&mut self, x: u16, y: u16, p: Pixel) {
+        self.set_pixel(
+            u32::from(x) << self.upscale_shift,
+            u32::from(y) << self.upscale_shift,
+            p,
+        )
+    }
+
+    /// Returns the pixel at x, y where x and y are in upscaled coordinates
+    fn pixel(&self, x: u32, y: u32) -> Pixel {
+        let x = x as usize;
+        let y = y as usize;
+
+        self.pixels[(1024 << self.upscale_shift) * y + x]
+    }
+
+    /// Sets the pixel at x, y where x and y are in upscaled coordinates
+    fn set_pixel(&mut self, x: u32, y: u32, p: Pixel) {
+        let x = x as usize;
+        let y = y as usize;
+
+        self.pixels[(1024 << self.upscale_shift) * y + x] = p
+    }
+}
+
+impl Serialize for VRam {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut tup = serializer.serialize_tuple(1024 * 512)?;
+
+        for y in 0..512 {
+            for x in 0..1024 {
+                tup.serialize_element(&self.native_pixel(x, y))?;
+            }
+        }
+
+        tup.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for VRam {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct VRamVisitor {
+            phantom: PhantomData<VRam>,
+        }
+
+        impl<'de> Visitor<'de> for VRamVisitor {
+            type Value = VRam;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "an array of 1024 * 512 pixels")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> std::result::Result<VRam, S::Error>
+            where
+                S: SeqAccess<'de>,
+            {
+                let mut vram = VRam::new();
+
+                for y in 0..512 {
+                    for x in 0..1024 {
+                        let p = match seq.next_element()? {
+                            Some(p) => p,
+                            None => return Err(de::Error::invalid_length(y * 1024 + x, &self)),
+                        };
+
+                        vram.set_native_pixel(x as u16, y as u16, p);
+                    }
+                }
+
+                Ok(vram)
+            }
+        }
+
+        let visitor = VRamVisitor {
+            phantom: PhantomData,
+        };
+        deserializer.deserialize_tuple(1024 * 512, visitor)
     }
 }

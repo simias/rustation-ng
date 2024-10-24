@@ -227,6 +227,7 @@ pub enum RasterizerOption {
     DitherForceDisable(bool),
     Wireframe(bool),
     DrawPolygons(bool),
+    UpscaleShift(u8),
 }
 
 /// Buffer containing one rendered frame
