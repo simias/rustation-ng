@@ -83,7 +83,6 @@ pub struct Rasterizer {
     ///   position.
     /// * `[_; 4]`: y % 4 to select the right position in the dithering pattern based on the vram
     ///   position.
-    ///
     /// * `[_; 0x200]`: input value, from 0x000 to 0x1ff. Values above 0xff are saturated to 0xff
     #[serde(with = "serialize_dither_table")]
     dither_table: [[[u8; 0x200]; 4]; 4],
@@ -108,7 +107,7 @@ pub struct Rasterizer {
 impl Rasterizer {
     pub fn new() -> Rasterizer {
         Rasterizer {
-            vram: VRam::new(),
+            vram: VRam::with_upscale_shift(0),
             state: State::WaitingForCommand,
             cur_frame: Frame::new(0, 0),
             clip_x_min: 0,
@@ -332,12 +331,30 @@ impl Rasterizer {
         if self.vram.upscale_shift == upscale_shift {
             return;
         }
-        // let vram_1x = if self.upscale_shift == 0 {
-        //     self.vram;
-        // }
-        //
-        // self.upscale_shift = upscale_shift
-        todo!()
+
+        self.clip_x_min >>= self.vram.upscale_shift;
+        self.clip_y_min >>= self.vram.upscale_shift;
+        self.clip_x_max >>= self.vram.upscale_shift;
+        self.clip_x_max >>= self.vram.upscale_shift;
+
+        self.clip_x_min <<= upscale_shift;
+        self.clip_y_min <<= upscale_shift;
+        self.clip_x_max <<= upscale_shift;
+        self.clip_x_max <<= upscale_shift;
+
+        // The clip is inclusive, so we need to offset when upscaling
+        self.clip_x_max += (1 << self.vram.upscale_shift) - 1;
+        self.clip_y_max += (1 << self.vram.upscale_shift) - 1;
+
+        let mut vram = VRam::with_upscale_shift(upscale_shift);
+
+        for y in 0..512 {
+            for x in 0..1024 {
+                vram.set_native_pixel(x, y, self.vram.native_pixel(x, y));
+            }
+        }
+
+        self.vram = vram;
     }
 
     /// Called when we should output a line to the output buffer
@@ -368,9 +385,9 @@ impl Rasterizer {
     }
 
     fn output_line(&mut self, x_start: u16, vram_y: u16, frame_y: u16) {
-        let x_start = x_start as u32;
-        let frame_y = frame_y as u32;
-        let vram_y = vram_y as i32;
+        let x_start = u32::from(x_start) << self.vram.upscale_shift;
+        let frame_y = u32::from(frame_y) << self.vram.upscale_shift;
+        let vram_y = i32::from(vram_y) << self.vram.upscale_shift;
 
         if frame_y >= self.cur_frame.height {
             // Out-of-frame. This should only happen if the video mode changed within the current
@@ -378,7 +395,9 @@ impl Rasterizer {
             return;
         }
 
-        let width = min(self.cur_frame.width, self.display_mode.xres() as u32);
+        let xres = u32::from(self.display_mode.xres()) << self.vram.upscale_shift;
+
+        let width = min(self.cur_frame.width, xres);
 
         if self.display_mode.output_24bpp() {
             // GPU is in 24bpp mode, we need to do some bitwise magic to recreate the values
@@ -414,9 +433,12 @@ impl Rasterizer {
             }
         } else {
             // GPU outputs pixels "normally", 15bpp native
-            for x in 0..width {
-                let p = self.read_pixel((x_start + x) as i32, vram_y);
-                self.cur_frame.set_pixel(x, frame_y, p.to_rgb888());
+            for y in 0..(1i32 << self.vram.upscale_shift) {
+                for x in 0..width {
+                    let p = self.read_pixel((x_start + x) as i32, vram_y + y);
+                    self.cur_frame
+                        .set_pixel(x, frame_y + (y as u32), p.to_rgb888());
+                }
             }
         }
     }
@@ -472,7 +494,10 @@ impl Rasterizer {
                     height -= 1;
                 }
 
-                (width as u32, height as u32)
+                let w = u32::from(width) << self.vram.upscale_shift;
+                let h = u32::from(height) << self.vram.upscale_shift;
+
+                (w, h)
             }
             mode => {
                 let (w, h) = mode.max_resolution();
@@ -486,7 +511,8 @@ impl Rasterizer {
                 if self.cur_frame.width >= u32::from(w) && self.cur_frame.height >= u32::from(h) {
                     for y in 0..h {
                         for x in 0..w {
-                            self.cur_frame.pixels[usize::from(y * w + x)] = match mode {
+                            let px_off = usize::from(y) * usize::from(w) + usize::from(x);
+                            self.cur_frame.pixels[px_off] = match mode {
                                 VRamDisplayMode::Native => unreachable!(),
                                 VRamDisplayMode::Full16bpp => {
                                     self.vram.native_pixel(x, y).to_rgb888()
@@ -633,10 +659,18 @@ impl Rasterizer {
     }
 
     fn read_pixel(&self, x: i32, y: i32) -> Pixel {
-        debug_assert!((0..1024).contains(&x), "x out of bounds ({})", x);
-        debug_assert!((0..1024).contains(&y), "y out of bounds ({})", y);
+        debug_assert!(
+            (0..(1024 << self.vram.upscale_shift)).contains(&x),
+            "x out of bounds ({})",
+            x
+        );
+        debug_assert!(
+            (0..(1024 << self.vram.upscale_shift)).contains(&y),
+            "y out of bounds ({})",
+            y
+        );
 
-        let y = (y & 0x1ff) as u32;
+        let y = (y & ((0x200 << self.vram.upscale_shift) - 1)) as u32;
         let x = x as u32;
 
         self.vram.pixel(x, y)
@@ -647,12 +681,20 @@ impl Rasterizer {
         Transparency: TransparencyMode,
         Texture: TextureMode,
     {
-        debug_assert!((0..1024).contains(&x), "x out of bounds ({})", x);
-        debug_assert!((0..1024).contains(&y), "y out of bounds ({})", y);
+        debug_assert!(
+            (0..(1024 << self.vram.upscale_shift)).contains(&x),
+            "x out of bounds ({})",
+            x
+        );
+        debug_assert!(
+            (0..(1024 << self.vram.upscale_shift)).contains(&y),
+            "y out of bounds ({})",
+            y
+        );
 
         // Apparently the PlayStation GPU supports 2MB VRAM (1024x1024, used in some arcade
         // machines apparently) but the bottom half isn't installed so it wraps around.
-        let y = (y & 0x1ff) as u32;
+        let y = (y & ((0x200 << self.vram.upscale_shift) - 1)) as u32;
         let x = x as u32;
 
         let bg_pixel = self.vram.pixel(x, y);
@@ -733,7 +775,7 @@ impl Rasterizer {
         let y_min = a.position.y;
         let y_max = c.position.y;
 
-        if y_max - y_min >= 512 {
+        if y_max - y_min >= (512 << self.vram.upscale_shift) {
             // Triangle is too tall, give up
             return;
         }
@@ -762,7 +804,7 @@ impl Rasterizer {
 
         let x_max = vertices.iter().map(|v| v.position.x).max().unwrap();
 
-        if x_max - x_min >= 1024 {
+        if x_max - x_min >= (1024 << self.vram.upscale_shift) {
             // Triangle is too large, give up
             return;
         }
@@ -1105,28 +1147,34 @@ impl Rasterizer {
             (0, 0)
         };
 
+        /* We always draw rects at native res */
+        let clip_x_min = self.clip_x_min >> self.vram.upscale_shift;
+        let clip_y_min = self.clip_y_min >> self.vram.upscale_shift;
+        let clip_x_max = self.clip_x_max >> self.vram.upscale_shift;
+        let clip_y_max = self.clip_y_max >> self.vram.upscale_shift;
+
         let mut x_start = origin.x();
-        let x_end = min(x_start + width, self.clip_x_max + 1);
+        let x_end = min(x_start + width, clip_x_max + 1);
 
         let mut y_start = origin.y();
-        let y_end = min(y_start + height, self.clip_y_max + 1);
+        let y_end = min(y_start + height, clip_y_max + 1);
 
-        if x_start < self.clip_x_min {
+        if x_start < clip_x_min {
             if Texture::is_textured() {
-                let skip = (self.clip_x_min - x_start) * u_inc;
+                let skip = (clip_x_min - x_start) * u_inc;
 
                 u_start = u_start.wrapping_add(skip as u8);
             }
-            x_start = self.clip_x_min;
+            x_start = clip_x_min;
         }
 
-        if y_start < self.clip_y_min {
+        if y_start < clip_y_min {
             if Texture::is_textured() {
-                let skip = (self.clip_y_min - y_start) * u_inc;
+                let skip = (clip_y_min - y_start) * u_inc;
 
                 v = v.wrapping_add(skip as u8);
             }
-            y_start = self.clip_y_min;
+            y_start = clip_y_min;
         }
 
         if x_end <= x_start || y_end <= y_start {
@@ -1154,18 +1202,32 @@ impl Rasterizer {
                     let texel = self.get_texel(u, v);
                     // If the pixel is equal to 0 (including mask bit) then we don't draw it
                     if !texel.is_nul() {
-                        if Texture::is_raw_texture() {
-                            self.draw_pixel::<Transparency, Texture>(x, y, texel);
-                        } else {
-                            // Texture blending: the final color is a combination of the texel and
-                            // the solid color. Rect are never dithered.
-                            let blend = self.blend(texel, origin.color);
-                            self.draw_pixel::<Transparency, Texture>(x, y, blend);
+                        for y in
+                            (y << self.vram.upscale_shift)..((y + 1) << self.vram.upscale_shift)
+                        {
+                            for x in
+                                (x << self.vram.upscale_shift)..((x + 1) << self.vram.upscale_shift)
+                            {
+                                if Texture::is_raw_texture() {
+                                    self.draw_pixel::<Transparency, Texture>(x, y, texel);
+                                } else {
+                                    // Texture blending: the final color is a combination of the texel and
+                                    // the solid color. Rect are never dithered.
+                                    let blend = self.blend(texel, origin.color);
+                                    self.draw_pixel::<Transparency, Texture>(x, y, blend);
+                                }
+                            }
                         }
                     }
                 } else {
                     // No texture
-                    self.draw_pixel::<Transparency, Texture>(x, y, color);
+                    for y in (y << self.vram.upscale_shift)..((y + 1) << self.vram.upscale_shift) {
+                        for x in
+                            (x << self.vram.upscale_shift)..((x + 1) << self.vram.upscale_shift)
+                        {
+                            self.draw_pixel::<Transparency, Texture>(x, y, color);
+                        }
+                    }
                 }
                 u = u.wrapping_add(u_inc as u8);
             }
@@ -1201,7 +1263,7 @@ impl Rasterizer {
             return;
         }
 
-        if dx >= 1024 || dy >= 512 {
+        if dx >= (1024 << self.vram.upscale_shift) || dy >= (512 << self.vram.upscale_shift) {
             // Line is too long, ignore
             return;
         }
@@ -2065,6 +2127,9 @@ where
         vertex.position.x = extend_to_i32(vertex.position.x as u32, 11);
         vertex.position.y = extend_to_i32(vertex.position.y as u32, 11);
 
+        vertex.position.x <<= rasterizer.vram.upscale_shift;
+        vertex.position.y <<= rasterizer.vram.upscale_shift;
+
         if Texture::is_textured() {
             if v == 0 {
                 clut = params[index];
@@ -2155,6 +2220,9 @@ where
         // flickering on FFVIII's Dollet bridge
         vertex.position.x = extend_to_i32(vertex.position.x as u32, 11);
         vertex.position.y = extend_to_i32(vertex.position.y as u32, 11);
+
+        vertex.position.x <<= rasterizer.vram.upscale_shift;
+        vertex.position.y <<= rasterizer.vram.upscale_shift;
 
         if Texture::is_textured() {
             if v == 0 {
@@ -2296,6 +2364,8 @@ where
 
             v.position.x += rasterizer.draw_offset_x;
             v.position.y += rasterizer.draw_offset_y;
+            v.position.x <<= rasterizer.vram.upscale_shift;
+            v.position.y <<= rasterizer.vram.upscale_shift;
 
             (opcode as u8, v)
         }
@@ -2312,6 +2382,9 @@ where
     end_vertex.set_position(params[index]);
     end_vertex.position.x += rasterizer.draw_offset_x;
     end_vertex.position.y += rasterizer.draw_offset_y;
+
+    end_vertex.position.x <<= rasterizer.vram.upscale_shift;
+    end_vertex.position.y <<= rasterizer.vram.upscale_shift;
 
     rasterizer.draw_line::<Transparency, Shading>(start_vertex, end_vertex.clone());
 
@@ -2335,6 +2408,8 @@ where
     index += 1;
     start_vertex.position.x += rasterizer.draw_offset_x;
     start_vertex.position.y += rasterizer.draw_offset_y;
+    start_vertex.position.x <<= rasterizer.vram.upscale_shift;
+    start_vertex.position.y <<= rasterizer.vram.upscale_shift;
 
     let mut end_vertex = Vertex::new(0);
 
@@ -2348,6 +2423,9 @@ where
     end_vertex.set_position(params[index]);
     end_vertex.position.x += rasterizer.draw_offset_x;
     end_vertex.position.y += rasterizer.draw_offset_y;
+
+    end_vertex.position.x <<= rasterizer.vram.upscale_shift;
+    end_vertex.position.y <<= rasterizer.vram.upscale_shift;
 
     rasterizer.draw_line::<Transparency, Shading>(start_vertex, end_vertex);
 }
@@ -2406,10 +2484,10 @@ fn cmd_vram_copy(rasterizer: &mut Rasterizer, params: &[u32]) {
     let dst = params[2];
     let dim = params[3];
 
-    let src_x = (src & 0x3ff) as i32;
-    let src_y = ((src >> 16) & 0x3ff) as i32;
-    let dst_x = (dst & 0x3ff) as i32;
-    let dst_y = ((dst >> 16) & 0x3ff) as i32;
+    let src_x = ((src & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+    let src_y = (((src >> 16) & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+    let dst_x = ((dst & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+    let dst_y = (((dst >> 16) & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
 
     let (width, height) = vram_access_dimensions(dim, false);
 
@@ -2417,23 +2495,27 @@ fn cmd_vram_copy(rasterizer: &mut Rasterizer, params: &[u32]) {
     // different buffer?
     rasterizer.tex_mapper.cache_invalidate();
 
+    let xmask = (0x400 << rasterizer.vram.upscale_shift) - 1;
+    let ymask = (0x200 << rasterizer.vram.upscale_shift) - 1;
+
     for y in 0..height {
-        let sy = (y + src_y) & 0x1ff;
-        let ty = (y + dst_y) & 0x1ff;
+        let sy = (y + src_y) & ymask;
+        let ty = (y + dst_y) & ymask;
 
         for x in (0..width).step_by(128) {
             // The use of a 128px intermediate buffer is taken from mednafen
+            // XXX should we scale with the upscale_shift?
             let mut copy_buf: [Pixel; 128] = [Pixel(0); 128];
 
             let w = std::cmp::min(width - x, 128);
 
             for dx in 0..w {
-                let sx = (src_x + x + dx) & 0x3ff;
+                let sx = (src_x + x + dx) & xmask;
                 copy_buf[dx as usize] = rasterizer.read_pixel(sx, sy);
             }
 
             for dx in 0..w {
-                let tx = (dst_x + x + dx) & 0x3ff;
+                let tx = (dst_x + x + dx) & xmask;
 
                 let p = copy_buf[dx as usize];
 
@@ -2521,15 +2603,19 @@ fn cmd_tex_window(rasterizer: &mut Rasterizer, params: &[u32]) {
 fn cmd_clip_top_left(rasterizer: &mut Rasterizer, params: &[u32]) {
     let clip = params[0];
 
-    rasterizer.clip_x_min = (clip & 0x3ff) as i32;
-    rasterizer.clip_y_min = ((clip >> 10) & 0x3ff) as i32;
+    rasterizer.clip_x_min = ((clip & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+    rasterizer.clip_y_min = (((clip >> 10) & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
 }
 
 fn cmd_clip_bot_right(rasterizer: &mut Rasterizer, params: &[u32]) {
     let clip = params[0];
 
-    rasterizer.clip_x_max = (clip & 0x3ff) as i32;
-    rasterizer.clip_y_max = ((clip >> 10) & 0x3ff) as i32;
+    rasterizer.clip_x_max = ((clip & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+    rasterizer.clip_y_max = (((clip >> 10) & 0x3ff) as i32) << rasterizer.vram.upscale_shift;
+
+    // The clip is inclusive, so we need to offset when upscaling
+    rasterizer.clip_x_max += (1 << rasterizer.vram.upscale_shift) - 1;
+    rasterizer.clip_y_max += (1 << rasterizer.vram.upscale_shift) - 1;
 }
 
 fn cmd_draw_mode(rasterizer: &mut Rasterizer, params: &[u32]) {
@@ -3658,10 +3744,10 @@ struct VRam {
 }
 
 impl VRam {
-    fn new() -> VRam {
+    fn with_upscale_shift(upscale_shift: u8) -> VRam {
         VRam {
-            pixels: vec![Pixel::black(); 1024 * 512],
-            upscale_shift: 0,
+            pixels: vec![Pixel::black(); (1024 << upscale_shift) * (512 << upscale_shift)],
+            upscale_shift,
         }
     }
 
@@ -3675,11 +3761,15 @@ impl VRam {
 
     /// Sets the pixel at x, y where x an y are in native 1x coordinates.
     fn set_native_pixel(&mut self, x: u16, y: u16, p: Pixel) {
-        self.set_pixel(
-            u32::from(x) << self.upscale_shift,
-            u32::from(y) << self.upscale_shift,
-            p,
-        )
+        for yo in 0..(1 << self.upscale_shift) {
+            for xo in 0..(1 << self.upscale_shift) {
+                self.set_pixel(
+                    (u32::from(x) << self.upscale_shift) + xo,
+                    (u32::from(y) << self.upscale_shift) + yo,
+                    p,
+                )
+            }
+        }
     }
 
     /// Returns the pixel at x, y where x and y are in upscaled coordinates
@@ -3736,7 +3826,7 @@ impl<'de> Deserialize<'de> for VRam {
             where
                 S: SeqAccess<'de>,
             {
-                let mut vram = VRam::new();
+                let mut vram = VRam::with_upscale_shift(0);
 
                 for y in 0..512 {
                     for x in 0..1024 {

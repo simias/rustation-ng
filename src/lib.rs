@@ -393,7 +393,7 @@ impl Context {
     }
 
     fn get_geometry(&self) -> libretro::GameGeometry {
-        let upscaling = options::CoreOptions::internal_upscale_factor();
+        let upscale_shift = options::CoreOptions::internal_upscale_factor();
 
         let vram_display_mode = options::CoreOptions::display_full_vram();
 
@@ -406,12 +406,14 @@ impl Context {
         let max_width;
         let max_height;
         if w <= 640 && h <= 576 {
-            max_width = (640 * upscaling) as libc::c_uint;
-            max_height = (576 * upscaling) as libc::c_uint;
+            max_width = (640 << upscale_shift) as libc::c_uint;
+            max_height = (576 << upscale_shift) as libc::c_uint;
         } else {
             // Normally only used in "weird" modes such as "show full VRAM"
-            max_width = (w * upscaling) as libc::c_uint;
-            max_height = (h * upscaling) as libc::c_uint;
+            //
+            // Does not scale with upscale_shift
+            max_width = w as libc::c_uint;
+            max_height = h as libc::c_uint;
         }
 
         libretro::GameGeometry {
@@ -695,6 +697,11 @@ impl libretro::Context for Context {
         self.psx
             .gpu
             .set_rasterizer_option(RasterizerOption::DrawPolygons(draw_poly));
+
+        let upscale_shift = options::CoreOptions::internal_upscale_factor();
+        self.psx
+            .gpu
+            .set_rasterizer_option(RasterizerOption::UpscaleShift(upscale_shift));
 
         self.psx
             .cd
@@ -1119,8 +1126,8 @@ mod options {
 
     libretro_variables!(
     pub struct CoreOptions (prefix = "rustation") {
-        internal_upscale_factor: u32, parse_upscale
-            => "Internal upscaling factor; 1x (native)";
+        internal_upscale_factor: u8, parse_upscale
+            => "Internal upscaling factor; 1x (native)|2x|4x";
         internal_color_depth: u8, parse_u8
             => "Internal color depth; dithered 15bpp (native)|24bpp";
         display_full_vram: VRamDisplayMode, parse_full_vram
@@ -1181,10 +1188,12 @@ mod options {
         }
     }
 
-    fn parse_upscale(opt: &str) -> Result<u32, <u32 as FromStr>::Err> {
+    fn parse_upscale(opt: &str) -> Result<u8, <u8 as FromStr>::Err> {
         let num = opt.trim_matches(|c: char| !c.is_numeric());
 
-        num.parse()
+        let n: u8 = num.parse()?;
+
+        Ok(n.ilog2() as u8)
     }
 
     fn parse_percent(opt: &str) -> Result<f32, <u32 as FromStr>::Err> {
