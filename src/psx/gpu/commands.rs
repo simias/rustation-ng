@@ -771,7 +771,7 @@ fn cmd_nop(psx: &mut Psx) {
 
 /// Placeholder function
 fn cmd_unimplemented(psx: &mut Psx) {
-    unimplemented!("GPU command {:08x}", psx.gpu.command_fifo.pop());
+    warn!("GPU command {:08x}", psx.gpu.command_fifo.pop());
 }
 
 /// LUT for all GP0 commands (indexed by opcode, bits[31:24] of the first command word)

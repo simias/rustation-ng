@@ -2648,7 +2648,7 @@ fn cmd_clear_cache(rasterizer: &mut Rasterizer, _params: &[u32]) {
 
 /// Placeholder function
 fn cmd_unimplemented(_rasterizer: &mut Rasterizer, params: &[u32]) {
-    unimplemented!("GPU command {:08x}", params[0]);
+    warn!("GPU command {:08x}", params[0]);
 }
 
 /// LUT for all GP0 commands (indexed by opcode, bits[31:24] of the first command word)
