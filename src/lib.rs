@@ -114,6 +114,8 @@ struct Context {
     analog_compensation: f32,
     /// CD state overlay mode
     cd_overlay: CdOverlay,
+    /// SPU state overlay mode
+    spu_overlay: bool,
     /// Current position of the CD spin indicator
     cd_spin_pos: f32,
 }
@@ -140,6 +142,7 @@ impl Context {
             analog_combo: AnalogCombo::SelectR3,
             analog_compensation: 1.,
             cd_overlay: CdOverlay::Disabled,
+            spu_overlay: false,
             cd_spin_pos: 0.,
         };
 
@@ -470,6 +473,32 @@ impl Context {
             }
         }
 
+        if self.spu_overlay {
+            use crate::psx::gpu::Pixel;
+
+            let key_h = frame.height / 50;
+            let key_yoff = (frame.height - key_h * 24) / 25;
+
+            let key_w = frame.width / 20;
+            let key_xoff = frame.width / 100;
+
+            for v in 0..24 {
+                let color = if self.psx.spu.is_voice_active(v) {
+                    Pixel::from_rgb(0x40, 0xf0, 0x40)
+                } else {
+                    Pixel::from_rgb(0x40, 0x40, 0x40)
+                };
+
+                for x in key_xoff..(key_xoff + key_w) {
+                    let yoff = key_yoff + (key_yoff + key_h) * u32::from(v);
+
+                    for y in yoff..(yoff + key_h) {
+                        frame.pixels[(y * frame.width + x) as usize] = color.to_rgb888();
+                    }
+                }
+            }
+        }
+
         if let Some((state, speed, disc_pos)) = draw_cd_state {
             use crate::psx::gpu::Pixel;
 
@@ -660,6 +689,7 @@ impl libretro::Context for Context {
         self.analog_combo = options::CoreOptions::analog_combo();
         self.analog_compensation = options::CoreOptions::analog_compensation();
         self.cd_overlay = options::CoreOptions::cd_overlay();
+        self.spu_overlay = options::CoreOptions::spu_overlay();
 
         let vram_display_mode = options::CoreOptions::display_full_vram();
         self.psx
@@ -1142,6 +1172,8 @@ mod options {
             => "CD Loading Speed; 2x (Native)|4x|6x|8x|10x|12x|14x";
         cd_overlay: CdOverlay, parse_cd_overlay
             => "CD overlay; disabled|enabled|dynamic";
+        spu_overlay: bool, parse_bool
+            => "SPU overlay; disabled|enabled";
         reverb_enable: bool, parse_bool
             => "Enable audio reverberation; enabled|disabled";
         analog_combo: AnalogCombo, parse_analog_combo

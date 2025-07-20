@@ -227,6 +227,13 @@ impl Spu {
         self.regs[regmap::STATUS] = status;
     }
 
+    pub fn is_voice_active(&self, voice: u8) -> bool {
+        if self.voices[usize::from(voice)].level() == 0 {
+            return false;
+        }
+
+        true
+    }
     /// Returns true if `voice` is configured to output LFSR noise
     fn is_noise(&self, voice: u8) -> bool {
         self.voice_noise & (1 << voice) != 0
@@ -238,7 +245,7 @@ impl Spu {
     }
 
     /// Returns true if voice should be started
-    fn is_voice_started(&self, voice: u8) -> bool {
+    pub fn is_voice_started(&self, voice: u8) -> bool {
         self.voice_start & (1 << voice) != 0
     }
 
@@ -737,7 +744,7 @@ fn run_voice_cycle(psx: &mut Psx, voice: u8, sweep_factor: &mut i32) -> (i32, i3
         psx.spu[voice].next_raw_sample()
     };
 
-    let sample = psx.spu[voice].apply_enveloppe(raw_sample);
+    let sample = psx.spu[voice].apply_envelope(raw_sample);
 
     // Voices 1 and 3 write their samples back into SPU RAM (what No$ refers to as "capture")
     if voice == 1 {
@@ -1311,7 +1318,7 @@ impl Voice {
     }
 
     /// Apply the Attack Decay Sustain Release envelope to a sample
-    fn apply_enveloppe(&self, sample: i32) -> i32 {
+    fn apply_envelope(&self, sample: i32) -> i32 {
         let level = i32::from(self.adsr.level);
 
         (sample * level) >> 15
@@ -1337,7 +1344,7 @@ impl Voice {
         self.loop_index_force = false;
     }
 
-    /// Put the ADSR enveloppe in "release" state if it's not already
+    /// Put the ADSR envelope in "release" state if it's not already
     fn release(&mut self) {
         self.adsr.release();
     }
