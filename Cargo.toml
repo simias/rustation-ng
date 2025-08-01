@@ -2,7 +2,7 @@
 name = "rustation-retro"
 version = "0.1.0"
 authors = ["Lionel Flandrin <lionel@svkt.org>"]
-edition = "2018"
+edition = "2024"
 description = "A PlayStation emulator libretro core"
 license = "GPL-2.0+"
 keywords = ["emulator", "playstation"]

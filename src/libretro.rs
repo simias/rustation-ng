@@ -67,14 +67,14 @@ pub trait Context {
 /// never dereferenced. It cannot be 0 however, since that would be a NULL pointer.
 static mut STATIC_CONTEXT: *mut dyn Context = 1 as *mut dummy::Context;
 
-unsafe fn set_context(context: Box<dyn Context>) {
+unsafe fn set_context(context: Box<dyn Context>) { unsafe {
     STATIC_CONTEXT = Box::into_raw(context);
-}
+}}
 
-unsafe fn drop_context() {
+unsafe fn drop_context() { unsafe {
     drop(Box::from_raw(STATIC_CONTEXT));
     STATIC_CONTEXT = &mut dummy::Context;
-}
+}}
 
 fn context() -> &'static mut dyn Context {
     unsafe { &mut *STATIC_CONTEXT }
@@ -1024,9 +1024,9 @@ pub fn set_geometry(geom: &GameGeometry) -> bool {
 
 /// # Safety
 /// Can destroy the OpenGL context!
-pub unsafe fn set_system_av_info(av_info: &SystemAvInfo) -> bool {
+pub unsafe fn set_system_av_info(av_info: &SystemAvInfo) -> bool { unsafe {
     call_environment(Environment::SetSystemAvInfo, av_info)
-}
+}}
 
 /// Display `msg` on the screen for `nframes` frames
 pub fn set_message(nframes: u32, msg: &str) {
@@ -1061,21 +1061,21 @@ pub fn variables_need_update() -> bool {
 
 /// # Safety
 /// `variables` *must* end with a `{ NULL, NULL }` marker
-pub unsafe fn register_variables(variables: &[Variable]) -> bool {
+pub unsafe fn register_variables(variables: &[Variable]) -> bool { unsafe {
     call_environment_slice(Environment::SetVariables, variables)
-}
+}}
 
-unsafe fn call_environment_mut<T>(which: Environment, var: *mut T) -> bool {
+unsafe fn call_environment_mut<T>(which: Environment, var: *mut T) -> bool { unsafe {
     ENVIRONMENT(which as c_uint, var as *mut c_void)
-}
+}}
 
-unsafe fn call_environment<T>(which: Environment, var: &T) -> bool {
+unsafe fn call_environment<T>(which: Environment, var: &T) -> bool { unsafe {
     ENVIRONMENT(which as c_uint, var as *const _ as *mut c_void)
-}
+}}
 
-unsafe fn call_environment_slice<T>(which: Environment, var: &[T]) -> bool {
+unsafe fn call_environment_slice<T>(which: Environment, var: &[T]) -> bool { unsafe {
     ENVIRONMENT(which as c_uint, var.as_ptr() as *const _ as *mut c_void)
-}
+}}
 
 /// Cast a mutable pointer into a mutable reference, return None if it's NULL.
 fn ptr_as_mut_ref<'a, T>(v: *mut T) -> Option<&'a mut T> {
@@ -1099,13 +1099,13 @@ fn ptr_as_ref<'a, T>(v: *const T) -> Option<&'a T> {
 // Libretro entry points called by the frontend
 //**********************************************
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_api_version() -> c_uint {
     // We implement the version 1 of the API
     1
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_environment(callback: EnvironmentFn) {
     unsafe { ENVIRONMENT = callback }
 
@@ -1113,32 +1113,32 @@ pub extern "C" fn retro_set_environment(callback: EnvironmentFn) {
     super::init_controllers();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_video_refresh(callback: VideoRefreshFn) {
     unsafe { VIDEO_REFRESH = callback }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_audio_sample(_: AudioSampleFn) {}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_audio_sample_batch(callback: AudioSampleBatchFn) {
     unsafe { AUDIO_SAMPLE_BATCH = callback }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_input_poll(callback: InputPollFn) {
     unsafe { INPUT_POLL = callback }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_input_state(callback: InputStateFn) {
     unsafe { INPUT_STATE = callback }
 }
 
 static mut FIRST_INIT: bool = true;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_init() {
     // retro_init can potentially be called several times even if the
     // library hasn't been unloaded (statics are not reset etc...)
@@ -1153,14 +1153,14 @@ pub extern "C" fn retro_init() {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_deinit() {
     unsafe {
         drop_context();
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_get_system_info(info: *mut SystemInfo) {
     let info = ptr_as_mut_ref(info).unwrap();
 
@@ -1168,14 +1168,14 @@ pub extern "C" fn retro_get_system_info(info: *mut SystemInfo) {
     *info = super::SYSTEM_INFO;
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_get_system_av_info(info: *mut SystemAvInfo) {
     let info = ptr_as_mut_ref(info).unwrap();
 
     *info = context().get_system_av_info();
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_set_controller_port_device(port: c_uint, device: c_uint) {
     let port = port as usize;
     let class = match InputDevice::from_subclass(device) {
@@ -1190,15 +1190,15 @@ pub extern "C" fn retro_set_controller_port_device(port: c_uint, device: c_uint)
     context().set_controller(port, class, device);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_reset() {
     context().reset();
 }
 
 /// # Safety
 /// Should only be called by the frontend, messes with the context
-#[no_mangle]
-pub unsafe extern "C" fn retro_run() {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn retro_run() { unsafe {
     INPUT_POLL();
 
     let context = context();
@@ -1208,14 +1208,14 @@ pub unsafe extern "C" fn retro_run() {
     }
 
     context.render_frame();
-}
+}}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_serialize_size() -> size_t {
     context().serialize_size()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_serialize(data: *mut c_void, size: size_t) -> bool {
     let data = unsafe { ::std::slice::from_raw_parts_mut(data as *mut u8, size) };
 
@@ -1229,20 +1229,20 @@ pub extern "C" fn retro_serialize(data: *mut c_void, size: size_t) -> bool {
     context().serialize(data).is_ok()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_unserialize(data: *const c_void, size: size_t) -> bool {
     let data = unsafe { ::std::slice::from_raw_parts(data as *const u8, size) };
 
     context().unserialize(data).is_ok()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_cheat_reset() {}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn retro_cheat_set(_index: c_uint, _enabled: bool, _code: *const c_char) {}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_load_game(info: *const GameInfo) -> bool {
     let info = ptr_as_ref(info).unwrap();
 
@@ -1294,7 +1294,7 @@ fn init_rumble() {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_load_game_special(
     _type: c_uint,
     _info: *const GameInfo,
@@ -1305,22 +1305,22 @@ pub extern "C" fn retro_load_game_special(
 
 /// # Safety
 /// Should only be called by the frontend, destroys the global context
-#[no_mangle]
-pub unsafe extern "C" fn retro_unload_game() {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn retro_unload_game() { unsafe {
     drop_context();
-}
+}}
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_get_region() -> c_uint {
     0
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_get_memory_data(_id: c_uint) -> *mut c_void {
     ptr::null_mut()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn retro_get_memory_size(_id: c_uint) -> size_t {
     0
 }
@@ -1479,7 +1479,7 @@ pub unsafe fn get_variable<T, E>(
 ) -> T
 where
     E: std::fmt::Debug,
-{
+{ unsafe {
     let mut v = Variable {
         key: var_cstr as *const _,
         value: ptr::null(),
@@ -1497,10 +1497,10 @@ where
         Ok(v) => v,
         Err(e) => panic!("Couldn't parse variable {}: {:?}", var, e),
     }
-}
+}}
 
 macro_rules! cstring {
-    ($x:expr) => {
+    ($x:expr_2021) => {
         concat!($x, '\0') as *const _ as *const ::libc::c_char
     };
 }
@@ -1544,8 +1544,8 @@ macro_rules! cstring {
 /// ```
 #[macro_export]
 macro_rules! libretro_variables {
-    (pub struct $st:ident (prefix = $prefix:expr) {
-        $($name:ident : $ty:ty , $parser:expr => $str:expr);+$(;)*
+    (pub struct $st:ident (prefix = $prefix:expr_2021) {
+        $($name:ident : $ty:ty , $parser:expr_2021 => $str:expr_2021);+$(;)*
     }) => (
         pub struct $st;
 
@@ -1588,6 +1588,6 @@ macro_rules! libretro_variables {
 
 #[macro_export]
 macro_rules! libretro_message {
-    ($nframes:expr, $($arg:tt)+) =>
+    ($nframes:expr_2021, $($arg:tt)+) =>
         ($crate::libretro::set_message($nframes, &format!($($arg)+)))
 }
