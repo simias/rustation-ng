@@ -413,7 +413,7 @@ impl Gpu {
             }
             4 => {
                 let bottom = self.clip_y_max as u32;
-                let right = (self.clip_x_max - 1) as u32;
+                let right = self.clip_x_max as u32;
 
                 right | (bottom << 10)
             }
