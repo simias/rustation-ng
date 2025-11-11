@@ -47,7 +47,7 @@ impl Cache {
         }
     }
 
-    fn reader(&self) -> (MutexGuard<Reader>, &Condvar) {
+    fn reader(&self) -> (MutexGuard<'_, Reader>, &Condvar) {
         let (reader, cond) = &*self.reader;
 
         (reader.lock().unwrap(), cond)
