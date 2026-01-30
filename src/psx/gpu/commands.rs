@@ -2322,11 +2322,13 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
         fifo_len: 1,
         out_of_band: false,
     },
+    // Command 0xffff_ffff occurs in Xenogears (Japan) during the cutscene in the middle of the
+    // first fight against Ganador in the arena.
     Command {
-        handler: cmd_unimplemented,
+        handler: cmd_nop,
         len: 1,
         fifo_len: 1,
-        out_of_band: false,
+        out_of_band: true,
     },
 ];
 
