@@ -1,9 +1,9 @@
 //! CXD1815Q (similar to CXD1815Q) emulation
 
-use super::{resampler::AudioResampler, Cdc};
+use super::{Cdc, resampler::AudioResampler};
 use crate::bitwise::Bitwise;
-use cdimage::sector::{XaBitsPerSample, XaCodingAudio, XaSamplingFreq};
 use cdimage::Sector;
+use cdimage::sector::{XaBitsPerSample, XaCodingAudio, XaSamplingFreq};
 use std::fmt;
 
 /// CXD1815Q
@@ -368,11 +368,7 @@ impl Decoder {
                             let s = audio_data[(i << 2) | (unit >> 1)];
 
                             // Convert the sample to 8 bit by setting the low 4 bits to 0
-                            if unit & 1 == 0 {
-                                s << 4
-                            } else {
-                                s & 0xf0
-                            }
+                            if unit & 1 == 0 { s << 4 } else { s & 0xf0 }
                         };
 
                         // Convert to signed 16 bits

@@ -2,12 +2,12 @@
 
 use std::fmt;
 
-use crate::assembler::syntax::*;
 use crate::assembler::Assembler;
+use crate::assembler::syntax::*;
 use crate::psx::cd::disc::Region;
 use crate::sha::sha256;
 
-use super::{Bios, BIOS_SIZE};
+use super::{BIOS_SIZE, Bios};
 
 pub struct Metadata {
     pub sha256: [u8; 32],

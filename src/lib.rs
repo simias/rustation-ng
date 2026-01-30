@@ -59,7 +59,7 @@ use cdimage::cue::Cue;
 use error::{PsxError, Result};
 use memory_card::MemoryCardFile;
 use psx::bios::Metadata;
-use psx::bios::{Bios, BIOS_SIZE};
+use psx::bios::{BIOS_SIZE, Bios};
 use psx::cd::CdcState;
 use psx::disc::Disc;
 use psx::gpu::RasterizerOption;

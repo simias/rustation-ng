@@ -1,6 +1,6 @@
 //! CXD2545Q DSP emulation
 
-use super::{us_to_audio_cycles, Cdc};
+use super::{Cdc, us_to_audio_cycles};
 use crate::bitwise::Bitwise;
 use crate::psx::cd::disc::Region;
 use cdimage::{DiscPosition, Msf};

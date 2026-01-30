@@ -2,7 +2,7 @@
 
 use super::libretro;
 
-use std::io::{stderr, Write};
+use std::io::{Write, stderr};
 
 struct RetroLogger;
 

@@ -1,9 +1,9 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
+use crate::psx::Psx;
 use crate::psx::cop0;
 use crate::psx::cpu::RegisterIndex;
-use crate::psx::Psx;
 
 use crate::debugger::Debugger;
 

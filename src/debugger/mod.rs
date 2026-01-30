@@ -1,8 +1,8 @@
 use std::net::TcpListener;
 
+use crate::psx::Psx;
 use crate::psx::debugger::Debugger as DebuggerInterface;
 use crate::psx::map::mask_region;
-use crate::psx::Psx;
 
 use self::gdb::GdbRemote;
 

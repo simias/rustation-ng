@@ -67,14 +67,18 @@ pub trait Context {
 /// never dereferenced. It cannot be 0 however, since that would be a NULL pointer.
 static mut STATIC_CONTEXT: *mut dyn Context = 1 as *mut dummy::Context;
 
-unsafe fn set_context(context: Box<dyn Context>) { unsafe {
-    STATIC_CONTEXT = Box::into_raw(context);
-}}
+unsafe fn set_context(context: Box<dyn Context>) {
+    unsafe {
+        STATIC_CONTEXT = Box::into_raw(context);
+    }
+}
 
-unsafe fn drop_context() { unsafe {
-    drop(Box::from_raw(STATIC_CONTEXT));
-    STATIC_CONTEXT = &mut dummy::Context;
-}}
+unsafe fn drop_context() {
+    unsafe {
+        drop(Box::from_raw(STATIC_CONTEXT));
+        STATIC_CONTEXT = &mut dummy::Context;
+    }
+}
 
 fn context() -> &'static mut dyn Context {
     unsafe { &mut *STATIC_CONTEXT }
@@ -513,7 +517,7 @@ pub enum PixelFormat {
 }
 
 pub mod hw_context {
-    use super::{call_environment_mut, Environment};
+    use super::{Environment, call_environment_mut};
     use libc::{c_char, c_uint, c_void, uintptr_t};
     use std::ffi::CString;
     use std::ptr::addr_of_mut;
@@ -601,7 +605,7 @@ pub mod hw_context {
 }
 
 pub mod log {
-    use super::{call_environment_mut, Environment};
+    use super::{Environment, call_environment_mut};
     use libc::c_char;
     use std::ffi::CString;
 
@@ -674,7 +678,7 @@ pub mod log {
 }
 
 pub mod disc_control {
-    use super::{call_environment, call_environment_mut, context, Environment, GameInfo};
+    use super::{Environment, GameInfo, call_environment, call_environment_mut, context};
     use libc::{c_char, c_uint, size_t};
     use std::ffi::CStr;
 
@@ -1024,9 +1028,9 @@ pub fn set_geometry(geom: &GameGeometry) -> bool {
 
 /// # Safety
 /// Can destroy the OpenGL context!
-pub unsafe fn set_system_av_info(av_info: &SystemAvInfo) -> bool { unsafe {
-    call_environment(Environment::SetSystemAvInfo, av_info)
-}}
+pub unsafe fn set_system_av_info(av_info: &SystemAvInfo) -> bool {
+    unsafe { call_environment(Environment::SetSystemAvInfo, av_info) }
+}
 
 /// Display `msg` on the screen for `nframes` frames
 pub fn set_message(nframes: u32, msg: &str) {
@@ -1061,21 +1065,21 @@ pub fn variables_need_update() -> bool {
 
 /// # Safety
 /// `variables` *must* end with a `{ NULL, NULL }` marker
-pub unsafe fn register_variables(variables: &[Variable]) -> bool { unsafe {
-    call_environment_slice(Environment::SetVariables, variables)
-}}
+pub unsafe fn register_variables(variables: &[Variable]) -> bool {
+    unsafe { call_environment_slice(Environment::SetVariables, variables) }
+}
 
-unsafe fn call_environment_mut<T>(which: Environment, var: *mut T) -> bool { unsafe {
-    ENVIRONMENT(which as c_uint, var as *mut c_void)
-}}
+unsafe fn call_environment_mut<T>(which: Environment, var: *mut T) -> bool {
+    unsafe { ENVIRONMENT(which as c_uint, var as *mut c_void) }
+}
 
-unsafe fn call_environment<T>(which: Environment, var: &T) -> bool { unsafe {
-    ENVIRONMENT(which as c_uint, var as *const _ as *mut c_void)
-}}
+unsafe fn call_environment<T>(which: Environment, var: &T) -> bool {
+    unsafe { ENVIRONMENT(which as c_uint, var as *const _ as *mut c_void) }
+}
 
-unsafe fn call_environment_slice<T>(which: Environment, var: &[T]) -> bool { unsafe {
-    ENVIRONMENT(which as c_uint, var.as_ptr() as *const _ as *mut c_void)
-}}
+unsafe fn call_environment_slice<T>(which: Environment, var: &[T]) -> bool {
+    unsafe { ENVIRONMENT(which as c_uint, var.as_ptr() as *const _ as *mut c_void) }
+}
 
 /// Cast a mutable pointer into a mutable reference, return None if it's NULL.
 fn ptr_as_mut_ref<'a, T>(v: *mut T) -> Option<&'a mut T> {
@@ -1198,17 +1202,19 @@ pub extern "C" fn retro_reset() {
 /// # Safety
 /// Should only be called by the frontend, messes with the context
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn retro_run() { unsafe {
-    INPUT_POLL();
+pub unsafe extern "C" fn retro_run() {
+    unsafe {
+        INPUT_POLL();
 
-    let context = context();
+        let context = context();
 
-    if variables_need_update() {
-        context.refresh_variables();
+        if variables_need_update() {
+            context.refresh_variables();
+        }
+
+        context.render_frame();
     }
-
-    context.render_frame();
-}}
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_serialize_size() -> size_t {
@@ -1306,9 +1312,11 @@ pub extern "C" fn retro_load_game_special(
 /// # Safety
 /// Should only be called by the frontend, destroys the global context
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn retro_unload_game() { unsafe {
-    drop_context();
-}}
+pub unsafe extern "C" fn retro_unload_game() {
+    unsafe {
+        drop_context();
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn retro_get_region() -> c_uint {
@@ -1479,25 +1487,27 @@ pub unsafe fn get_variable<T, E>(
 ) -> T
 where
     E: std::fmt::Debug,
-{ unsafe {
-    let mut v = Variable {
-        key: var_cstr as *const _,
-        value: ptr::null(),
-    };
+{
+    unsafe {
+        let mut v = Variable {
+            key: var_cstr as *const _,
+            value: ptr::null(),
+        };
 
-    let ok = call_environment_mut(Environment::GetVariable, &mut v);
+        let ok = call_environment_mut(Environment::GetVariable, &mut v);
 
-    if !ok || v.value.is_null() {
-        panic!("Couldn't get variable {}", var);
+        if !ok || v.value.is_null() {
+            panic!("Couldn't get variable {}", var);
+        }
+
+        let value = CStr::from_ptr(v.value).to_str().unwrap();
+
+        match parser(value) {
+            Ok(v) => v,
+            Err(e) => panic!("Couldn't parse variable {}: {:?}", var, e),
+        }
     }
-
-    let value = CStr::from_ptr(v.value).to_str().unwrap();
-
-    match parser(value) {
-        Ok(v) => v,
-        Err(e) => panic!("Couldn't parse variable {}: {:?}", var, e),
-    }
-}}
+}
 
 macro_rules! cstring {
     ($x:expr_2021) => {

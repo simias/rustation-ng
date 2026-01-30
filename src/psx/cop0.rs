@@ -9,7 +9,7 @@
 //! the PSX.
 
 use super::cpu::RegisterIndex;
-use super::{cpu, irq, Psx};
+use super::{Psx, cpu, irq};
 
 /// Coprocessor 0: System control
 #[derive(serde::Serialize, serde::Deserialize)]

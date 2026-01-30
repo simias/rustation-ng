@@ -6,7 +6,7 @@ mod fifo;
 mod fir;
 mod reverb_resampler;
 
-use super::{cd, cpu, irq, sync, AccessWidth, Addressable, CycleCount, Psx};
+use super::{AccessWidth, Addressable, CycleCount, Psx, cd, cpu, irq, sync};
 use fifo::DecoderFifo;
 use reverb_resampler::ReverbResampler;
 use std::ops::{Index, IndexMut};

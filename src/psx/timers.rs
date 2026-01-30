@@ -5,7 +5,7 @@
 //! - Timer 1: GPU horizontal blanking
 //! - Timer 2: System clock / 8
 
-use super::{irq, sync, Addressable, CycleCount, Psx};
+use super::{Addressable, CycleCount, Psx, irq, sync};
 use std::cmp::min;
 use std::ops::{Index, IndexMut};
 

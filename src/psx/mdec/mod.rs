@@ -1,6 +1,6 @@
 mod fifo;
 
-use super::{sync, AccessWidth, Addressable, CycleCount, Psx};
+use super::{AccessWidth, Addressable, CycleCount, Psx, sync};
 use crate::bitwise::Bitwise;
 use fifo::Fifo;
 use std::cmp::min;
@@ -775,11 +775,7 @@ fn quantize(coef: u16, quantization: u8, qscale: Option<u8>) -> i16 {
             let c = c << 4;
 
             // XXX This is from mednafen, not sure why this is needed.
-            if c < 0 {
-                c + 8
-            } else {
-                c - 8
-            }
+            if c < 0 { c + 8 } else { c - 8 }
         };
 
         // Saturate

@@ -2,7 +2,7 @@
 
 pub mod devices;
 
-use super::{irq, sync, AccessWidth, Addressable, CycleCount, Psx};
+use super::{AccessWidth, Addressable, CycleCount, Psx, irq, sync};
 use irq::Interrupt;
 
 use self::devices::Peripheral;

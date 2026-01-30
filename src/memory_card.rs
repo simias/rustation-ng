@@ -2,8 +2,8 @@
 
 use crate::box_array::BoxArray;
 use crate::libretro;
-use crate::psx::pad_memcard::devices::memory_card::{MemoryCard, FLASH_SIZE};
 use crate::psx::pad_memcard::devices::DeviceInterface;
+use crate::psx::pad_memcard::devices::memory_card::{FLASH_SIZE, MemoryCard};
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};

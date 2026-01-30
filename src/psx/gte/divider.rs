@@ -14,11 +14,7 @@ pub fn divide(numerator: u16, divisor: u16) -> u32 {
 
     let res = (n * reciprocal + 0x8000) >> 16;
 
-    if res <= 0x1ffff {
-        res as u32
-    } else {
-        0x1ffff
-    }
+    if res <= 0x1ffff { res as u32 } else { 0x1ffff }
 }
 
 fn reciprocal(d: u16) -> u32 {

@@ -1,4 +1,4 @@
-use super::{dma, gpu, mdec, pad_memcard, spu, timers, CycleCount, Psx};
+use super::{CycleCount, Psx, dma, gpu, mdec, pad_memcard, spu, timers};
 
 /// Tokens used to keep track of the progress of each module individually
 #[derive(serde::Serialize, serde::Deserialize, Copy, Clone, PartialEq, Eq, Debug)]

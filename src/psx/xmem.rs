@@ -2,7 +2,7 @@
 //! code.
 
 use super::bios::BIOS_SIZE;
-use super::{cpu, AccessWidth, Addressable};
+use super::{AccessWidth, Addressable, cpu};
 use crate::box_array::BoxArray;
 use crate::error::{PsxError, Result};
 use crate::sha::sha256;

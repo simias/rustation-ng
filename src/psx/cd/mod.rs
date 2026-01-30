@@ -4,7 +4,7 @@ mod cdc;
 pub mod disc;
 pub mod iso9660;
 
-use super::{irq, Addressable, Psx};
+use super::{Addressable, Psx, irq};
 use crate::error::{PsxError, Result};
 use crate::sha::sha256;
 pub use cdc::CdcState;

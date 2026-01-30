@@ -1,7 +1,7 @@
 //! The PlayStation DMA, that can be used to copy data between the RAM and various devices (GPU,
 //! CD drive, MDEC, SPU etc...)
 
-use super::{cd, gpu, irq, mdec, spu, sync, Addressable, CycleCount, Psx};
+use super::{Addressable, CycleCount, Psx, cd, gpu, irq, mdec, spu, sync};
 use irq::IrqState;
 use std::ops::{Index, IndexMut};
 

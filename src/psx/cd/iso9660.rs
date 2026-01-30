@@ -1,9 +1,9 @@
 //! Very partial implementation of the ISO 9660 filesystem
 
 use super::disc::CdCache;
+use cdimage::CdError;
 use cdimage::bcd::Bcd;
 use cdimage::msf::Msf;
-use cdimage::CdError;
 use std::sync::Arc;
 use thiserror::Error;
 

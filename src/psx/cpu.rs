@@ -3,7 +3,7 @@
 //! The timings code is copied from mednafen
 
 use super::cop0::Exception;
-use super::{cop0, map, AccessWidth, Addressable, CycleCount, Psx};
+use super::{AccessWidth, Addressable, CycleCount, Psx, cop0, map};
 
 #[cfg(feature = "debugger")]
 use super::debugger;

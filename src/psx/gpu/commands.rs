@@ -2332,7 +2332,7 @@ pub static GP0_COMMANDS: [Command; 0x100] = [
 
 #[test]
 fn check_poly_callbacks() {
-    use crate::psx::{bios, cd, gpu, Psx};
+    use crate::psx::{Psx, bios, cd, gpu};
 
     let dummy_bios = bios::Bios::new_dummy();
     let mut dummy_psx = Psx::new_with_bios(

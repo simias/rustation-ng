@@ -6,11 +6,11 @@ mod tests;
 use std::sync::mpsc;
 
 use super::{Command, CommandBuffer, Frame, RasterizerOption};
-use crate::psx::gpu::commands::{vram_access_dimensions, Shaded};
+use crate::VRamDisplayMode;
 use crate::psx::gpu::commands::{NoShading, Position, Transparent};
 use crate::psx::gpu::commands::{NoTexture, Opaque, ShadingMode, TextureBlending, TextureRaw};
+use crate::psx::gpu::commands::{Shaded, vram_access_dimensions};
 use crate::psx::gpu::commands::{TextureMode, TransparencyMode};
-use crate::VRamDisplayMode;
 
 use crate::psx::gpu::{DisplayMode, DrawMode, MaskSettings, TextureWindow, TransparencyFunction};
 use fixed_point::{FpCoord, FpVar};

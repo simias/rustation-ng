@@ -1,5 +1,5 @@
-use crate::psx::map::mask_region;
 use crate::psx::Psx;
+use crate::psx::map::mask_region;
 
 /// Called every time the PC changes when BIOS call logging is enabled
 pub fn check_bios_call(psx: &mut Psx) {

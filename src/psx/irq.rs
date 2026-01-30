@@ -1,6 +1,6 @@
 //! IRQ handling
 
-use super::{cpu, Psx};
+use super::{Psx, cpu};
 
 /// The PlayStation supports 10 interrupts
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]

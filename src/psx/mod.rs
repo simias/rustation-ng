@@ -18,7 +18,7 @@ mod timers;
 mod xmem;
 
 use crate::error::{PsxError, Result};
-pub use cd::{disc, iso9660, CDC_ROM_SHA256, CDC_ROM_SIZE};
+pub use cd::{CDC_ROM_SHA256, CDC_ROM_SIZE, disc, iso9660};
 pub use gpu::{Frame, VideoStandard};
 use serde::de::{Deserialize, Deserializer};
 use std::cmp::min;
