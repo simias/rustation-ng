@@ -65,7 +65,7 @@ pub trait Context {
 /// The weird cast is here to make rustc happy with the mutable static pointer. It's a valid cast
 /// because `dummy::Context` is 0-sized so the pointer doesn't actually point to anything and is
 /// never dereferenced. It cannot be 0 however, since that would be a NULL pointer.
-static mut STATIC_CONTEXT: *mut dyn Context = 1 as *mut dummy::Context;
+static mut STATIC_CONTEXT: *mut dyn Context = std::ptr::dangling_mut::<dummy::Context>();
 
 unsafe fn set_context(context: Box<dyn Context>) {
     unsafe {
@@ -653,7 +653,7 @@ pub mod log {
         // Make sure the message ends in a \n, mandated by the
         // libretro API.
 
-        let trailing_newline = msg.as_bytes().last().map_or(false, |&c| c == b'\n');
+        let trailing_newline = msg.as_bytes().last().is_some_and(|&c| c == b'\n');
 
         let format = if trailing_newline {
             // Message already contains a \n
@@ -1586,11 +1586,11 @@ macro_rules! libretro_variables {
             $(#[allow(dead_code)]
               pub fn $name() -> $ty {
                 let cstr = cstring!(concat!($prefix, '_', stringify!($name)));
+                let n = stringify!($name);
+                let p = $parser;
 
                 unsafe {
-                    $crate::libretro::get_variable(stringify!($name),
-                                                   cstr,
-                                                   $parser)
+                    $crate::libretro::get_variable(n, cstr, p)
                 }
             })+
         });

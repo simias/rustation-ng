@@ -276,7 +276,7 @@ pub fn run_next_instruction(psx: &mut Psx) {
         debugger::pc_change(psx);
     }
 
-    if psx.cpu.current_pc % 4 != 0 {
+    if !psx.cpu.current_pc.is_multiple_of(4) {
         // PC is not correctly aligned!
         exception(psx, Exception::LoadAddressError);
         return;
@@ -1382,7 +1382,7 @@ fn op_lh(psx: &mut Psx, instruction: Instruction) {
 
     let addr = psx.cpu.reg(s).wrapping_add(i);
 
-    if addr % 2 == 0 {
+    if addr.is_multiple_of(2) {
         let (v, duration) = load::<u16>(psx, addr, false);
 
         // Cast as i16 to force sign extension
@@ -1408,10 +1408,10 @@ fn op_lwl(psx: &mut Psx, instruction: Instruction) {
 
     // This instruction bypasses the load delay restriction: this instruction will merge the new
     // contents with the value currently being loaded if need be.
-    if let Some((pending_reg, pending_value, _)) = psx.cpu.load {
-        if pending_reg == t {
-            cur_v = pending_value;
-        }
+    if let Some((pending_reg, pending_value, _)) = psx.cpu.load
+        && pending_reg == t
+    {
+        cur_v = pending_value;
     }
 
     // Next we load the *aligned* word containing the first addressed byte
@@ -1441,7 +1441,7 @@ fn op_lw(psx: &mut Psx, instruction: Instruction) {
     let addr = psx.cpu.reg(s).wrapping_add(i);
 
     // Address must be 32bit aligned
-    if addr % 4 == 0 {
+    if addr.is_multiple_of(4) {
         let (v, duration) = load(psx, addr, false);
 
         psx.cpu.delayed_load_chain(t, v, duration, true);
@@ -1474,7 +1474,7 @@ fn op_lhu(psx: &mut Psx, instruction: Instruction) {
     let addr = psx.cpu.reg(s).wrapping_add(i);
 
     // Address must be 16bit aligned
-    if addr % 2 == 0 {
+    if addr.is_multiple_of(2) {
         let (v, duration) = load::<u16>(psx, addr, false);
 
         // Put the load in the delay slot
@@ -1497,10 +1497,10 @@ fn op_lwr(psx: &mut Psx, instruction: Instruction) {
 
     // This instruction bypasses the load delay restriction: this instruction will merge the new
     // contents with the value currently being loaded if need be.
-    if let Some((pending_reg, pending_value, _)) = psx.cpu.load {
-        if pending_reg == t {
-            cur_v = pending_value;
-        }
+    if let Some((pending_reg, pending_value, _)) = psx.cpu.load
+        && pending_reg == t
+    {
+        cur_v = pending_value;
     }
 
     // Next we load the *aligned* word containing the first addressed byte
@@ -1547,7 +1547,7 @@ fn op_sh(psx: &mut Psx, instruction: Instruction) {
     psx.cpu.delayed_load();
 
     // Address must be 16bit aligned
-    if addr % 2 == 0 {
+    if addr.is_multiple_of(2) {
         store(psx, addr, v as u16);
     } else {
         exception(psx, Exception::StoreAddressError);
@@ -1592,7 +1592,7 @@ fn op_sw(psx: &mut Psx, instruction: Instruction) {
     psx.cpu.delayed_load();
 
     // Address must be 32bit aligned
-    if addr % 4 == 0 {
+    if addr.is_multiple_of(4) {
         store(psx, addr, v);
     } else {
         exception(psx, Exception::StoreAddressError);
@@ -1656,7 +1656,7 @@ fn op_lwc2(psx: &mut Psx, instruction: Instruction) {
     psx.cpu.delayed_load();
 
     // Address must be 32bit aligned
-    if addr % 4 == 0 {
+    if addr.is_multiple_of(4) {
         // XXX how should we handle duration here? No absorb?
         let (v, _duration) = load::<u32>(psx, addr, true);
 
@@ -1710,7 +1710,7 @@ fn op_swc2(psx: &mut Psx, instruction: Instruction) {
     psx.cpu.delayed_load();
 
     // Address must be 32bit aligned
-    if addr % 4 == 0 {
+    if addr.is_multiple_of(4) {
         store(psx, addr, v);
     } else {
         exception(psx, Exception::LoadAddressError);

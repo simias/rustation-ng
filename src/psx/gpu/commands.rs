@@ -181,7 +181,7 @@ where
     };
 
     // Order coords by x coordinates
-    coords.sort_by(|a, b| a.x.cmp(&b.x));
+    coords.sort_by_key(|a| a.x);
 
     let min_x = coords[0].x;
     let max_x = coords[2].x;
@@ -195,7 +195,7 @@ where
     }
 
     // Order coords by y coordinates
-    coords.sort_by(|a, b| a.y.cmp(&b.y));
+    coords.sort_by_key(|a| a.y);
 
     let min_y = coords[0].y;
     let max_y = coords[2].y;

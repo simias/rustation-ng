@@ -1,7 +1,6 @@
 //! Geometry Transform Engine (Coprocessor 2) emulation
 
 use super::CycleCount;
-use std::{i16, u16};
 
 mod divider;
 

@@ -477,16 +477,9 @@ pub fn run(psx: &mut Psx) {
         VideoStandard::Pal => GPU_CYCLES_PER_CPU_CYCLES_PAL,
     };
 
-    delta = (delta + clock_ratio - 1) / clock_ratio;
-
-    if delta < 1 {
-        delta = 1;
-    } else if delta > 128 {
-        // I believe that mednafen does that in order to trigger a call to `process_commands` very
-        // often and keep the GPU working. We could relax this when we don't care for very accurate
-        // timings
-        delta = 128;
-    }
+    // I believe that mednafen does that in order to trigger a call to `process_commands` very often
+    // and keep the GPU working. We could relax this when we don't care for very accurate timings
+    delta = delta.div_ceil(clock_ratio).clamp(1, 128);
 
     sync::next_event(psx, GPUSYNC, delta as CycleCount);
 }

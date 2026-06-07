@@ -128,12 +128,12 @@ impl MemoryCardFile {
         //
         // Besides, we should call `force_dump` when we're done with the card, so as long as we
         // don't crash we should be good.
-        if let Some(last_write) = self.write_pending_since {
-            if last_write >= WRITE_FLUSH_FRAME {
-                // We have a write pending and we haven't gotten new writes in `WRITE_FLUSH_FRAME`
-                // frames, commit to disk
-                self.dump(mc);
-            }
+        if let Some(last_write) = self.write_pending_since
+            && last_write >= WRITE_FLUSH_FRAME
+        {
+            // We have a write pending and we haven't gotten new writes in `WRITE_FLUSH_FRAME`
+            // frames, commit to disk
+            self.dump(mc);
         }
     }
 

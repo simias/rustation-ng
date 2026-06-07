@@ -418,25 +418,25 @@ fn predict_next_sync(psx: &mut Psx) {
     let mut next_event = 1_000_000;
 
     if psx.pad_memcard.dsr_it {
-        if let Some(e) = psx.pad_memcard.pad1_dsr.to_dsr() {
-            if e < next_event {
-                next_event = e;
-            }
+        if let Some(e) = psx.pad_memcard.pad1_dsr.to_dsr()
+            && e < next_event
+        {
+            next_event = e;
         }
-        if let Some(e) = psx.pad_memcard.pad2_dsr.to_dsr() {
-            if e < next_event {
-                next_event = e;
-            }
+        if let Some(e) = psx.pad_memcard.pad2_dsr.to_dsr()
+            && e < next_event
+        {
+            next_event = e;
         }
-        if let Some(e) = psx.pad_memcard.memcard1_dsr.to_dsr() {
-            if e < next_event {
-                next_event = e;
-            }
+        if let Some(e) = psx.pad_memcard.memcard1_dsr.to_dsr()
+            && e < next_event
+        {
+            next_event = e;
         }
-        if let Some(e) = psx.pad_memcard.memcard2_dsr.to_dsr() {
-            if e < next_event {
-                next_event = e;
-            }
+        if let Some(e) = psx.pad_memcard.memcard2_dsr.to_dsr()
+            && e < next_event
+        {
+            next_event = e;
         }
     }
 

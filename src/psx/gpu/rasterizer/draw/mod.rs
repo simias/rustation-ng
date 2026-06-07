@@ -737,7 +737,7 @@ impl Rasterizer {
         Shading: ShadingMode,
     {
         // Order the vertices by y
-        vertices.sort_by(|a, b| a.position.y.cmp(&b.position.y));
+        vertices.sort_by_key(|a| a.position.y);
 
         let a = &vertices[0];
         let b = &vertices[1];

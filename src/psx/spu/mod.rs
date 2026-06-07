@@ -824,7 +824,7 @@ fn run_voice_decoder(psx: &mut Psx, voice: u8) {
         }
     } else {
         // True if we're starting a new ADPCM block
-        let new_block = psx.spu[voice].cur_index % 8 == 0;
+        let new_block = psx.spu[voice].cur_index.is_multiple_of(8);
 
         if new_block {
             // Check if looping has been requested in the previous block
@@ -1368,10 +1368,10 @@ impl Voice {
 
 /// Saturating cast from i32 to i16
 fn saturate_to_i16(v: i32) -> i16 {
-    if v < i32::from(i16::min_value()) {
-        i16::min_value()
-    } else if v > i32::from(i16::max_value()) {
-        i16::max_value()
+    if v < i32::from(i16::MIN) {
+        i16::MIN
+    } else if v > i32::from(i16::MAX) {
+        i16::MAX
     } else {
         v as i16
     }
@@ -1514,7 +1514,7 @@ impl Adsr {
                 None => {
                     // Overflow
                     self.state = AdsrState::Decay;
-                    i16::max_value()
+                    i16::MAX
                 }
             }
         } else {
@@ -1522,7 +1522,7 @@ impl Adsr {
 
             if self.level < 0 {
                 // Overflow or underflow
-                self.level = if level_step > 0 { i16::max_value() } else { 0 };
+                self.level = if level_step > 0 { i16::MAX } else { 0 };
             }
         }
 
@@ -1625,10 +1625,10 @@ impl EnvelopeParams {
     }
 
     fn compute_divider_step(&self, cur_level: i16) -> u16 {
-        if let EnvelopeMode::SmoothUp(smooth_divider_step, _) = self.mode {
-            if cur_level >= 0x6000 {
-                return smooth_divider_step;
-            }
+        if let EnvelopeMode::SmoothUp(smooth_divider_step, _) = self.mode
+            && cur_level >= 0x6000
+        {
+            return smooth_divider_step;
         }
 
         self.divider_step

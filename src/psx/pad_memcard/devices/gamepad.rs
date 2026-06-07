@@ -258,13 +258,12 @@ impl DualShock {
                     self.watchdog = Some(0);
                 }
             }
-            4 => {
+            4
                 // If this command started in normal mode we don't send the analog state if
                 // analog_mode is false
-                if self.access_type == DsAccessType::NormalChangeMode && !self.analog_mode {
+                if self.access_type == DsAccessType::NormalChangeMode && !self.analog_mode => {
                     send_dsr = false;
                 }
-            }
             _ => (),
         }
 
@@ -605,8 +604,8 @@ impl DeviceInterface for DualShock {
         // of the controller we're using (at least once the user bothers to reach the full range of
         // the stick).
         fn radius(pos: (i16, i16)) -> f32 {
-            let x = (pos.0 as f32) / (i16::max_value() as f32);
-            let y = (pos.1 as f32) / (i16::max_value() as f32);
+            let x = (pos.0 as f32) / (i16::MAX as f32);
+            let y = (pos.1 as f32) / (i16::MAX as f32);
 
             (x * x + y * y).sqrt()
         }

@@ -258,7 +258,7 @@ fn parse_serial_number_from_system_cnf(system_cnf: &[u8]) -> Result<SerialNumber
     // boot_path should look like "cdrom:\FOO\BAR\...\aaaa_ddd.dd"
     let bin_name = boot_path
         .split(|&b| b == b':' || b == b'\\')
-        .last()
+        .next_back()
         .unwrap();
 
     let serial = SerialNumber::from_bin_name(bin_name);

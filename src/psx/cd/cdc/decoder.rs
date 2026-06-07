@@ -383,10 +383,10 @@ impl Decoder {
                         sample += (sample_1 * wp + sample_2 * wn) >> 6;
 
                         // Saturate to 16 bits
-                        let sample = if sample > i16::max_value() as i32 {
-                            i16::max_value()
-                        } else if sample < i16::min_value() as i32 {
-                            i16::min_value()
+                        let sample = if sample > i16::MAX as i32 {
+                            i16::MAX
+                        } else if sample < i16::MIN as i32 {
+                            i16::MIN
                         } else {
                             sample as i16
                         };

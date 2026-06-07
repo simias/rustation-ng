@@ -70,16 +70,16 @@ impl Cdc {
     /// open/shell close sequence timings are handled correctly.
     #[allow(clippy::result_large_err)]
     pub fn set_disc(&mut self, disc: Option<Disc>) -> Result<(), (PsxError, Option<Disc>)> {
-        if let (Some(old_disc), Some(new_disc)) = (&self.disc, &disc) {
-            if old_disc.serial_number() != new_disc.serial_number() {
-                return Err((
-                    PsxError::BadSerialNumber {
-                        expected: old_disc.serial_number(),
-                        got: new_disc.serial_number(),
-                    },
-                    disc,
-                ));
-            }
+        if let (Some(old_disc), Some(new_disc)) = (&self.disc, &disc)
+            && old_disc.serial_number() != new_disc.serial_number()
+        {
+            return Err((
+                PsxError::BadSerialNumber {
+                    expected: old_disc.serial_number(),
+                    got: new_disc.serial_number(),
+                },
+                disc,
+            ));
         };
 
         self.disc = disc;

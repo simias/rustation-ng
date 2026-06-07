@@ -36,10 +36,10 @@ impl AudioResampler {
 
         r >>= 15;
 
-        if r > i16::max_value() as i32 {
-            i16::max_value()
-        } else if r < i16::min_value() as i32 {
-            i16::min_value()
+        if r > i16::MAX as i32 {
+            i16::MAX
+        } else if r < i16::MIN as i32 {
+            i16::MIN
         } else {
             r as i16
         }

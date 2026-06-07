@@ -432,16 +432,12 @@ impl Psx {
             // configuration and report an error.
             match offset {
                 // Expansion 1 base address
-                0 => {
-                    if val != 0x1f00_0000 {
-                        panic!("Bad expansion 1 base address: 0x{:08x}", val);
-                    }
+                0 if val != 0x1f00_0000 => {
+                    panic!("Bad expansion 1 base address: 0x{:08x}", val);
                 }
                 // Expansion 2 base address
-                4 => {
-                    if val != 0x1f80_2000 {
-                        panic!("Bad expansion 2 base address: 0x{:08x}", val);
-                    }
+                4 if val != 0x1f80_2000 => {
+                    panic!("Bad expansion 2 base address: 0x{:08x}", val);
                 }
                 _ => (),
             }

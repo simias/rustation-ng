@@ -546,9 +546,9 @@ impl Context {
                 draw_octants(x, y);
 
                 while x < y {
-                    x = x + 1;
+                    x += 1;
                     if d > 0 {
-                        y = y - 1;
+                        y -= 1;
                         d = d + 4 * ((x as i32) - (y as i32)) + 10;
                     } else {
                         d = d + 4 * (x as i32) + 6;
