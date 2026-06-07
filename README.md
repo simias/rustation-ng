@@ -5,7 +5,7 @@ standalone emulator, it's an emulator core that implements the libretro
 interface and can be used to play PlayStation game in a libretro frontend such
 as RetroArch.
 
-![Crash Bandicoot on Rustation](https://svkt.org/~simias/crash-bandicoot.png)
+![Final Fantasy VII on Rustation](https://svkt.eu/misc/ff7.avif)
 
 A lot of this code is based on
 [No$ PSX specifications](http://problemkaputt.de/psx-spx.htm) and on
