@@ -1054,7 +1054,9 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
         // HINTMSK
         (3, 0) => decoder.hintmsk,
         // HINTSTS
-        (3, 1) => decoder.hintsts,
+        //
+        // Bits 5-7 are apparently always 1.
+        (3, 1) => decoder.hintsts | (0b111 << 5),
         _ => todo!("Host read @ {}:{}", addr, decoder.ra),
     }
 }
