@@ -276,6 +276,16 @@ impl Context {
                 libretro::set_rumble(port, libretro::RumbleEffect::Weak, weak);
             }
         }
+
+        #[cfg(feature = "debugger")]
+        {
+            if libretro::button_pressed(0, libretro::JoyPadButton::Select) &&
+                libretro::button_pressed(0, libretro::JoyPadButton::L) &&
+                    libretro::button_pressed(0, libretro::JoyPadButton::R)
+            {
+                psx::debugger::trigger_break(&mut self.psx);
+            }
+        }
     }
 
     fn load_image(image: &DiscImage) -> Result<Disc> {
