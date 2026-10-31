@@ -279,9 +279,9 @@ impl Context {
 
         #[cfg(feature = "debugger")]
         {
-            if libretro::button_pressed(0, libretro::JoyPadButton::Select) &&
-                libretro::button_pressed(0, libretro::JoyPadButton::L) &&
-                    libretro::button_pressed(0, libretro::JoyPadButton::R)
+            if libretro::button_pressed(0, libretro::JoyPadButton::Select)
+                && libretro::button_pressed(0, libretro::JoyPadButton::L)
+                && libretro::button_pressed(0, libretro::JoyPadButton::R)
             {
                 psx::debugger::trigger_break(&mut self.psx);
             }
@@ -953,6 +953,19 @@ impl libretro::Context for Context {
         }
 
         Ok(())
+    }
+
+    fn get_memory(&mut self, memory: libretro::Memory) -> Option<&mut [u8]> {
+        // The frontend will keep a mutable pointer around, aliasing our buffers. I really don't
+        // like that, so I only support it for system RAM (that should be relatively stable). Doing
+        // it for memory cards seems like a terrible idea since we can reallocate if we switch
+        // device.
+        //
+        // We *could* do it for GPU too, if necessary.
+        match memory {
+            libretro::Memory::SystemRam => Some(bytemuck::cast_slice_mut(self.psx.get_ram_mut())),
+            _ => None,
+        }
     }
 }
 

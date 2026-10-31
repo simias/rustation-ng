@@ -23,7 +23,7 @@ pub struct XMemory {
     /// * The BIOS page (the first 512KiB contain the BIOS, the rest is padded with 0xff)
     /// * The "bad" page that's filled with 0xff and used as placeholder for all pages that are not
     ///   executable.
-    memory: BoxArray<u32, MEMORY_SIZE>,
+    memory: BoxArray<u32, MEMORY_WORDS>,
     /// Look up table containing PAGE_SIZE offsets in `memory` for all pages in the system
     offset_lut: [u8; PAGE_COUNT],
     /// BIOS SHA-256, used to make sure that we load the same BIOS when restoring the savestate
@@ -45,13 +45,17 @@ impl XMemory {
         for &region in &REGION_OFFSETS {
             // RAM: mirrored 4 times
             for i in 0..4 {
-                xmem.remap(region + i * RAM_SIZE as u32, MemoryPage::Ram);
+                xmem.remap(region + i * RAM_SIZE_BYTES as u32, MemoryPage::Ram);
             }
             // BIOS
             xmem.remap(region + 0x1fc0_0000, MemoryPage::Bios);
         }
 
         xmem
+    }
+
+    pub fn get_ram_mut(&mut self) -> &mut [u32] {
+        &mut self.memory[..RAM_SIZE_WORDS]
     }
 
     /// Make `offset_lut` point at `target` for memory address `addr`
@@ -217,7 +221,7 @@ impl Serialize for XMemory {
         S: Serializer,
     {
         let ram_base = ((MemoryPage::Ram as usize) << PAGE_SHIFT) / 4;
-        let ram_len = RAM_SIZE / 4;
+        let ram_len = RAM_SIZE_BYTES / 4;
         let ram: Vec<_> = self
             .memory
             .iter()
@@ -282,10 +286,10 @@ const PAGE_COUNT: usize = 1 << (32 - PAGE_SHIFT);
 const REGION_OFFSETS: [u32; 3] = [0x0000_0000, 0x8000_0000, 0xa000_0000];
 
 /// System RAM: 2MB
-const RAM_SIZE: usize = 2 * 1024 * 1024;
+const RAM_SIZE_BYTES: usize = 2 * 1024 * 1024;
 
 /// RAM size in number of 32bit words
-const RAM_SIZE_WORDS: usize = RAM_SIZE / 4;
+const RAM_SIZE_WORDS: usize = RAM_SIZE_BYTES / 4;
 
 /// Total size of the memory buffer, in 32bit words
-const MEMORY_SIZE: usize = (PAGE_SIZE_BYTES * 3) >> 2;
+const MEMORY_WORDS: usize = (PAGE_SIZE_BYTES * 3) >> 2;

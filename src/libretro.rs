@@ -58,6 +58,8 @@ pub trait Context {
     fn add_image_index(&mut self) -> Result<(), ()>;
     /// Replace the image at `index`
     fn replace_image_index(&mut self, index: usize, path: &Path) -> Result<(), ()>;
+    /// Get a mutable pointer to the given memory region
+    fn get_memory(&mut self, memory: Memory) -> Option<&mut [u8]>;
 }
 
 /// Global context instance holding our emulator state. Libretro doesn't support multi-instancing
@@ -1323,14 +1325,42 @@ pub extern "C" fn retro_get_region() -> c_uint {
     0
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn retro_get_memory_data(_id: c_uint) -> *mut c_void {
-    ptr::null_mut()
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Memory {
+    SaveRam = 0,
+    Rtc = 1,
+    SystemRam = 2,
+    VideoRam = 3,
+    Rom = 4,
+}
+
+impl Memory {
+    fn from_id(id: c_uint) -> Option<Memory> {
+        match id {
+            0 => Some(Memory::SaveRam),
+            1 => Some(Memory::Rtc),
+            2 => Some(Memory::SystemRam),
+            3 => Some(Memory::VideoRam),
+            4 => Some(Memory::Rom),
+            _ => None,
+        }
+    }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn retro_get_memory_size(_id: c_uint) -> size_t {
-    0
+pub extern "C" fn retro_get_memory_data(id: c_uint) -> *mut c_void {
+    match Memory::from_id(id).and_then(|m| context().get_memory(m)) {
+        Some(buf) => buf.as_mut_ptr() as *mut _,
+        None => ptr::null_mut(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn retro_get_memory_size(id: c_uint) -> size_t {
+    match Memory::from_id(id).and_then(|m| context().get_memory(m)) {
+        Some(buf) => buf.len(),
+        None => 0,
+    }
 }
 
 pub mod dummy {
@@ -1444,6 +1474,10 @@ pub mod dummy {
 
         fn replace_image_index(&mut self, _: usize, _: &super::Path) -> Result<(), ()> {
             panic!("Called replace_image_index with no context!")
+        }
+
+        fn get_memory(&mut self, _memory: super::Memory) -> Option<&mut [u8]> {
+            None
         }
     }
 }

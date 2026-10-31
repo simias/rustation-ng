@@ -196,6 +196,10 @@ impl Psx {
         spu::get_samples(self)
     }
 
+    pub fn get_ram_mut(&mut self) -> &mut [u32] {
+        self.xmem.get_ram_mut()
+    }
+
     /// Clear any pending audio samples. This must be called at least once per frame.
     pub fn clear_audio_samples(&mut self) {
         spu::clear_samples(self)
