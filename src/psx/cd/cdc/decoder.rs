@@ -1055,7 +1055,7 @@ pub fn host_read(cdc: &mut Cdc, addr: u8) -> u8 {
         (3, 0) => decoder.hintmsk,
         // HINTSTS
         //
-        // Bits 5-7 are apparently always 1.
+        // Bits 5-7 are always 1, checked with HW test.
         (3, 1) => decoder.hintsts | (0b111 << 5),
         _ => todo!("Host read @ {}:{}", addr, decoder.ra),
     }
