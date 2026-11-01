@@ -12,6 +12,7 @@ mod gte;
 mod irq;
 mod mdec;
 pub mod pad_memcard;
+mod sio;
 mod spu;
 mod sync;
 mod timers;
@@ -60,6 +61,9 @@ pub struct Psx {
     dma_timing_penalty: CycleCount,
     /// When this variable is `true` the CPU is stopped for DMA operation
     cpu_stalled_for_dma: bool,
+    /// Serial IO
+    #[serde(default)]
+    sio: sio::Sio,
 }
 
 impl Psx {
@@ -107,6 +111,7 @@ impl Psx {
             cache_control: 0,
             dma_timing_penalty: 0,
             cpu_stalled_for_dma: false,
+            sio: sio::Sio::new(),
         })
     }
 
@@ -285,7 +290,6 @@ impl Psx {
 
         if let Some(offset) = map::PAD_MEMCARD.contains(abs_addr) {
             self.tick(1);
-            // TODO
             return pad_memcard::load(self, offset);
         }
 
@@ -324,6 +328,11 @@ impl Psx {
             // No expansion implemented. Returns full ones when no
             // expansion is present
             return Addressable::from_u32(!0);
+        }
+
+        if let Some(offset) = map::SIO.contains(abs_addr) {
+            self.tick(1);
+            return sio::load(self, offset);
         }
 
         if map::CACHE_CONTROL.contains(abs_addr).is_some() {
@@ -423,6 +432,11 @@ impl Psx {
             return;
         }
 
+        if let Some(offset) = map::SIO.contains(abs_addr) {
+            sio::store(self, offset, val);
+            return;
+        }
+
         if let Some(offset) = map::MEM_CONTROL.contains(abs_addr) {
             if T::width() != AccessWidth::Word {
                 panic!("Unhandled MEM_CONTROL {:?} access", T::width());
@@ -516,12 +530,18 @@ pub enum AccessWidth {
 
 /// rait representing the attributes of a primitive addressable
 /// memory location.
-pub trait Addressable {
+pub trait Addressable: Sized {
     /// Retrieve the width of the access
     fn width() -> AccessWidth;
     /// Build an Addressable value from an u32. If the Addressable is 8 or 16bits wide the MSBs are
     /// discarded to fit.
     fn from_u32(i: u32) -> Self;
+    /// Build an Addressable value from an u16. If the Addressable is 8 bits wide the MSBs are
+    /// discarded to fit.
+    fn from_u16(i: u16) -> Self {
+        Addressable::from_u32(i as _)
+    }
+
     /// Retrieve the value of the Addressable as an u32. If the Addressable is 8 or 16bits wide the
     /// MSBs are padded with 0s.
     fn as_u32(&self) -> u32;
@@ -688,7 +708,10 @@ pub mod map {
     pub const MEM_CONTROL: Range = Range(0x1f80_1000, 36);
 
     /// Gamepad and memory card controller
-    pub const PAD_MEMCARD: Range = Range(0x1f80_1040, 32);
+    pub const PAD_MEMCARD: Range = Range(0x1f80_1040, 16);
+
+    /// Serial port
+    pub const SIO: Range = Range(0x1f80_1050, 16);
 
     /// Register that has something to do with RAM configuration, configured by the BIOS
     pub const RAM_SIZE: Range = Range(0x1f80_1060, 4);

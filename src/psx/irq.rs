@@ -19,6 +19,8 @@ pub enum Interrupt {
     Timer2 = 6,
     /// Gamepad and Memory Card controller interrupt
     PadMemCard = 7,
+    /// Serial IO interrupt
+    Sio = 8,
     /// SPU interrupt
     Spu = 9,
 }
@@ -92,7 +94,7 @@ pub fn trigger(psx: &mut Psx, which: Interrupt) {
 
 pub fn set_mask(psx: &mut Psx, mask: u16) {
     // Temporary hack: trigger an error if a non-implemented interrupt is requested
-    let supported: [Interrupt; 8] = [
+    let supported: [Interrupt; 9] = [
         Interrupt::VBlank,
         Interrupt::CdRom,
         Interrupt::Dma,
@@ -100,6 +102,7 @@ pub fn set_mask(psx: &mut Psx, mask: u16) {
         Interrupt::Timer1,
         Interrupt::Timer2,
         Interrupt::PadMemCard,
+        Interrupt::Sio,
         Interrupt::Spu,
     ];
 
