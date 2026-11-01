@@ -621,7 +621,6 @@ where
 pub fn vram_access_dimensions(dim: u32, is_load: bool) -> (i32, i32) {
     // Width is in GPU pixels, i.e. 16bits per pixel
     let mut width = dim & 0x3ff;
-    let mut height = (dim >> 16) & 0x1ff;
 
     // XXX recheck this, a comment in mednafen says that the results for VRAM load are inconsistent
     if width == 0 {
@@ -629,13 +628,20 @@ pub fn vram_access_dimensions(dim: u32, is_load: bool) -> (i32, i32) {
     }
 
     // XXX not sure about this difference, taken from mednafen
-    if is_load {
-        if height > 0x200 {
-            height &= 0x1ff;
+    //
+    // Doing this correctly is important, otherwise we can hang after the first scripted fight in
+    // Star Ocean 2 for instance (VRAM load with height = 0x200)
+    let height = if is_load {
+        match (dim >> 16) & 0x3ff {
+            n if n <= 0x200 => n,
+            n => n & 0x1ff,
         }
-    } else if height == 0 {
-        height = 512;
-    }
+    } else {
+        match (dim >> 16) & 0x1ff {
+            0 => 0x200,
+            n => n,
+        }
+    };
 
     (width as i32, height as i32)
 }
