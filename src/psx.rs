@@ -64,6 +64,9 @@ pub struct Psx {
     /// Serial IO
     #[serde(default)]
     sio: sio::Sio,
+    /// If non-null, is used to buffer the BIOS calls to the putchar syscall for logging
+    #[serde(default)]
+    putchar_buf: Option<Vec<u8>>,
 }
 
 impl Psx {
@@ -112,6 +115,7 @@ impl Psx {
             dma_timing_penalty: 0,
             cpu_stalled_for_dma: false,
             sio: sio::Sio::new(),
+            putchar_buf: None,
         })
     }
 
@@ -517,6 +521,36 @@ impl Psx {
 
     fn set_cpu_stalled_for_dma(&mut self, stalled: bool) {
         self.cpu_stalled_for_dma = stalled;
+    }
+
+    pub fn enable_putchar_log(&mut self, en: bool) {
+        if en {
+            if self.putchar_buf.is_none() {
+                self.putchar_buf = Some(Vec::new());
+            }
+        } else {
+            self.putchar_buf = None;
+        }
+    }
+
+    fn putchar_log_active(&self) -> bool {
+        self.putchar_buf.is_some()
+    }
+
+    /// Called when the BIOS "putchar"
+    fn putchar(&mut self, c: u8) {
+        if let Some(b) = self.putchar_buf.as_mut() {
+            b.push(c);
+
+            if c == b'\n' {
+                // Flush in the log
+                let s = String::from_utf8_lossy(&b);
+
+                info!("[BIOS] {s}");
+
+                b.clear();
+            }
+        }
     }
 }
 

@@ -755,6 +755,9 @@ impl libretro::Context for Context {
             .gte
             .set_overclock(options::CoreOptions::gte_overclock());
 
+        self.psx
+            .enable_putchar_log(options::CoreOptions::bios_stdout());
+
         let mut memcard_types = [
             options::CoreOptions::memory_card_1_type(),
             options::CoreOptions::memory_card_2_type(),
@@ -1219,6 +1222,8 @@ mod options {
             per-game.0|per-game.1|per-game.2|per-game.3|per-game.4|per-game.5|per-game.6|per-game.7|per-game.8|per-game.9|\
             per-game.10|per-game.11|per-game.12|per-game.13|per-game.14|per-game.15|per-game.16|per-game.17|per-game.18|per-game.19|\
             disconnected";
+        bios_stdout: bool, parse_bool
+            => "Log BIOS stdout messages; disabled|enabled";
     });
 
     fn parse_memcard_index(opt: &str) -> Result<MemoryCardType, ()> {

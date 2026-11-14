@@ -276,6 +276,23 @@ pub fn run_next_instruction(psx: &mut Psx) {
         debugger::pc_change(psx);
     }
 
+    // Check for BIOS putchar if we're logging in-game debug messages
+    if psx.putchar_log_active() {
+        let pc = psx.cpu.current_pc;
+
+        // Putchar exists in two vectors, I haven't checked if both are used in practice.
+        if pc == 0xa0 || pc == 0xb0 {
+            let sys_no = psx.cpu.reg(RegisterIndex(9));
+
+            if (pc == 0xa0 && sys_no == 0x3c) || (pc == 0xb0 && sys_no == 0x3d) {
+                // Char in A0
+                let c = psx.cpu.reg(RegisterIndex(4)) as u8;
+
+                psx.putchar(c);
+            }
+        }
+    }
+
     if !psx.cpu.current_pc.is_multiple_of(4) {
         // PC is not correctly aligned!
         exception(psx, Exception::LoadAddressError);
