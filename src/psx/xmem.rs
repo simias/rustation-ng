@@ -2,6 +2,7 @@
 //! code.
 
 use super::bios::BIOS_SIZE;
+use super::pio;
 use super::{AccessWidth, Addressable, cpu};
 use crate::box_array::BoxArray;
 use crate::error::{PsxError, Result};
@@ -17,12 +18,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// implement support for extensions that associate side-effects to instruction fetches. I don't
 /// know if such extensions exist.
 pub struct XMemory {
-    /// We currently only support executing from RAM and BIOS so we need three concrete pages:
+    /// We currently only support executing from RAM, BIOS and PIO so we need 4 concrete pages:
     ///
     /// * The RAM page
     /// * The BIOS page (the first 512KiB contain the BIOS, the rest is padded with 0xff)
     /// * The "bad" page that's filled with 0xff and used as placeholder for all pages that are not
     ///   executable.
+    /// * The PIO page (512KiB, like the BIOS)
     memory: BoxArray<u32, MEMORY_WORDS>,
     /// Look up table containing PAGE_SIZE offsets in `memory` for all pages in the system
     offset_lut: [u8; PAGE_COUNT],
@@ -36,7 +38,7 @@ impl XMemory {
             // 0xffff_ffff isn't a valid instruction, so we'll know right away if we're executing
             // from a bad location. Also, 0xff is normally what's returned from unmapped memory
             // reads so it's sort of accurate for these regions.
-            memory: BoxArray::from_vec(vec![0xffff_ffff; (PAGE_SIZE_BYTES * 3) >> 2]),
+            memory: BoxArray::from_vec(vec![0xffff_ffff; (PAGE_SIZE_BYTES * 4) >> 2]),
             offset_lut: [MemoryPage::Bad as u8; PAGE_COUNT],
             bios_sha256: [0; 32],
         };
@@ -49,6 +51,7 @@ impl XMemory {
             }
             // BIOS
             xmem.remap(region + 0x1fc0_0000, MemoryPage::Bios);
+            xmem.remap(region + 0x1f00_0000, MemoryPage::Pio);
         }
 
         xmem
@@ -83,6 +86,29 @@ impl XMemory {
 
         // Update bios_sha256
         self.bios_sha256 = sha256(bios);
+    }
+
+    /// Copy the PIO data statically to xmem for execution
+    ///
+    /// This assumes that the PIO is effectively read-only, at least for code segments.
+    pub fn set_pio(&mut self, module: &mut dyn pio::PioModule) {
+        let base = (PAGE_SIZE_BYTES * MemoryPage::Pio as usize) >> 2;
+        let mem = &mut self.memory[base..(base + 512 * 1024)];
+
+        println!("Load PIO");
+        for (i, w) in mem.iter_mut().enumerate() {
+            let off = (i * 4) as u32;
+            let b0 = module.load(off);
+            let b1 = module.load(off + 1);
+            let b2 = module.load(off + 2);
+            let b3 = module.load(off + 3);
+
+            *w = u32::from_le_bytes([b0, b1, b2, b3]);
+
+            if *w != !0 {
+                println!("Set PIO {off:x} {w:x}");
+            }
+        }
     }
 
     /// Copy the BIOS from another XMemory instance, returning an error if the checksums differ
@@ -264,6 +290,7 @@ enum MemoryPage {
     Ram = 0,
     Bios = 1,
     Bad = 2,
+    Pio = 3,
 }
 
 /// Defines how big each cache page will be (log2 since it's a shift value).
@@ -292,4 +319,4 @@ const RAM_SIZE_BYTES: usize = 2 * 1024 * 1024;
 const RAM_SIZE_WORDS: usize = RAM_SIZE_BYTES / 4;
 
 /// Total size of the memory buffer, in 32bit words
-const MEMORY_WORDS: usize = (PAGE_SIZE_BYTES * 3) >> 2;
+const MEMORY_WORDS: usize = (PAGE_SIZE_BYTES * 4) >> 2;

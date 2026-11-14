@@ -37,4 +37,6 @@ pub enum PsxError {
     NoCdcFirmwareFound,
     #[error("Deserialization error: {0}")]
     DeserializationError(String),
+    #[error("PS-X EXE format error")]
+    BadPsExe,
 }

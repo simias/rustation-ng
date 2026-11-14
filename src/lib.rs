@@ -53,6 +53,7 @@ mod psx;
 mod retrolog;
 mod sha;
 
+use crate::psx::cd::disc::Region;
 use crate::sha::sha256;
 use box_array::BoxArray;
 use cdimage::cue::Cue;
@@ -65,6 +66,7 @@ use psx::disc::Disc;
 use psx::gpu::RasterizerOption;
 use psx::pad_memcard::devices::gamepad::{Button, ButtonState, DigitalPad, DualShock};
 use psx::pad_memcard::devices::{DeviceInterface, DisconnectedDevice};
+use psx::pio::exe_loader::ExeLoader;
 use psx::{CDC_ROM_SHA256, CDC_ROM_SIZE};
 use std::ffi::OsStr;
 use std::fs::File;
@@ -123,7 +125,14 @@ struct Context {
 impl Context {
     fn new(disc: &Path) -> Result<Context> {
         let image = DiscImage::new(disc);
-        let psx = Context::load_disc(&image)?;
+        let psx = match Context::load_disc(&image) {
+            Ok(psx) => psx,
+            Err(e) => {
+                warn!("Disc loading failed: {e}");
+                info!("Trying again as a PS-X EXE...");
+                Context::load_exe(&image)?
+            }
+        };
 
         let mut ctx = Context {
             psx,
@@ -317,6 +326,34 @@ impl Context {
         let cdc_firmware = find_cdc_firmware()?;
 
         let psx = Box::new(psx::Psx::new_with_disc(disc, bios, cdc_firmware)?);
+
+        Ok(psx)
+    }
+
+    fn load_exe(image: &DiscImage) -> Result<Box<psx::Psx>> {
+        let loader = ExeLoader::load_file(image.path())?;
+
+        let region = match loader.region() {
+            Some(r) => r,
+            None => {
+                warn!("Couldn't detect EXE region, using Europe");
+                Region::Europe
+            }
+        };
+
+        let mut bios = find_bios(|md| md.region == region)?;
+        loader.patch_bios(&mut bios)?;
+
+        let cdc_firmware = find_cdc_firmware()?;
+
+        let mut psx = Box::new(psx::Psx::new_with_bios(
+            None,
+            bios,
+            region.video_standard(),
+            cdc_firmware,
+        )?);
+
+        psx.set_pio_module(Box::new(loader));
 
         Ok(psx)
     }

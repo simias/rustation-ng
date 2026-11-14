@@ -2,16 +2,22 @@
 //! models)
 
 use super::{Addressable, Psx};
+pub mod exe_loader;
 
 pub struct Pio {
     module: Box<dyn PioModule>,
 }
 
 impl Pio {
+    /// Create a new, dummy Pio module that emulates an open port.
     pub fn disconnected() -> Pio {
         Pio {
             module: Box::new(Disconnected),
         }
+    }
+
+    pub fn set_module(&mut self, module: Box<dyn PioModule>) {
+        self.module = module;
     }
 }
 

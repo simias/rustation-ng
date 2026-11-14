@@ -42,6 +42,24 @@ impl Bios {
     pub fn get_rom(&self) -> &[u8; BIOS_SIZE] {
         &self.rom
     }
+
+    /// Attempt to modify the BIOS ROM to replace the call to the code responsible for the boot logo
+    /// animations by the provided instruction.
+    pub fn patch_animation_jump_hook(&mut self, instruction: u32) -> Result<()> {
+        match self.metadata.animation_jump_hook {
+            Some(h) => {
+                let h = h as usize;
+
+                self.rom[h] = instruction as u8;
+                self.rom[h + 1] = (instruction >> 8) as u8;
+                self.rom[h + 2] = (instruction >> 16) as u8;
+                self.rom[h + 3] = (instruction >> 24) as u8;
+
+                Ok(())
+            }
+            None => Err(PsxError::UnknownBios),
+        }
+    }
 }
 
 /// BIOS images are always 512KB in length

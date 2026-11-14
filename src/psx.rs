@@ -12,7 +12,7 @@ mod gte;
 mod irq;
 mod mdec;
 pub mod pad_memcard;
-mod pio;
+pub mod pio;
 mod sio;
 mod spu;
 mod sync;
@@ -555,6 +555,11 @@ impl Psx {
             }
         }
     }
+
+    pub fn set_pio_module(&mut self, mut module: Box<dyn pio::PioModule>) {
+        self.xmem.set_pio(&mut *module);
+        self.pio.set_module(module);
+    }
 }
 
 /// Types of access supported by the PlayStation architecture
@@ -714,6 +719,7 @@ pub mod map {
         addr & REGION_MASK[index]
     }
 
+    #[derive(Copy, Clone)]
     pub struct Range(u32, u32);
 
     impl Range {
@@ -726,6 +732,10 @@ pub mod map {
             } else {
                 None
             }
+        }
+
+        pub const fn start(self) -> u32 {
+            self.0
         }
     }
 
