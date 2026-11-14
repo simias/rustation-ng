@@ -12,6 +12,7 @@ mod gte;
 mod irq;
 mod mdec;
 pub mod pad_memcard;
+mod pio;
 mod sio;
 mod spu;
 mod sync;
@@ -64,6 +65,8 @@ pub struct Psx {
     /// Serial IO
     #[serde(default)]
     sio: sio::Sio,
+    #[serde(skip)]
+    pio: pio::Pio,
     /// If non-null, is used to buffer the BIOS calls to the putchar syscall for logging
     #[serde(default)]
     putchar_buf: Option<Vec<u8>>,
@@ -115,6 +118,7 @@ impl Psx {
             dma_timing_penalty: 0,
             cpu_stalled_for_dma: false,
             sio: sio::Sio::new(),
+            pio: pio::Pio::disconnected(),
             putchar_buf: None,
         })
     }
@@ -328,10 +332,9 @@ impl Psx {
             return Addressable::from_u32(v | 0x1f80_0000);
         }
 
-        if map::EXPANSION_1.contains(abs_addr).is_some() {
-            // No expansion implemented. Returns full ones when no
-            // expansion is present
-            return Addressable::from_u32(!0);
+        if let Some(offset) = map::EXPANSION_1.contains(abs_addr) {
+            // XXX timings are probably quite slow here, depending on the waitstates.
+            return pio::load(self, offset);
         }
 
         if let Some(offset) = map::SIO.contains(abs_addr) {
@@ -432,7 +435,7 @@ impl Psx {
         }
 
         if let Some(offset) = map::EXPANSION_1.contains(abs_addr) {
-            warn!("Unhandled write to expansion 1 register {:x}", offset);
+            pio::store(self, offset, val);
             return;
         }
 

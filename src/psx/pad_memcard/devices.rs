@@ -94,7 +94,8 @@ impl Serialize for Peripheral {
         S: Serializer,
     {
         // We don't serialize the device, because it could potentially change independently of the
-        // savestate (like changing the controller type). At worst it could mean a glitchy
+        // savestate (like changing the controller type). At worst it could mean a glitchy device,
+        // at worse it could cause save corruption.
         let s = SerializedPeripheral {
             seq: self.seq,
             active: self.active,
