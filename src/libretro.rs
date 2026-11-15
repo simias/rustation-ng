@@ -166,6 +166,7 @@ pub struct Message {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Environment {
     SetMessage = 6,
+    Shutdown = 7,
     GetSystemDirectory = 9,
     SetPixelFormat = 10,
     SetInputDescriptors = 11,
@@ -1050,6 +1051,12 @@ pub fn set_message(nframes: u32, msg: &str) {
 
     unsafe {
         call_environment(Environment::SetMessage, &message);
+    }
+}
+
+pub fn shutdown() {
+    unsafe {
+        call_environment(Environment::Shutdown, &());
     }
 }
 

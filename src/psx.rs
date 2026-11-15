@@ -70,6 +70,10 @@ pub struct Psx {
     /// If non-null, is used to buffer the BIOS calls to the putchar syscall for logging
     #[serde(default)]
     putchar_buf: Option<Vec<u8>>,
+    /// If the running program has requested shutdown through the magic EXPANSION_2 register, this
+    /// contains the shutdown code. Used for tests.
+    #[serde(default)]
+    pub shutdown: Option<u16>,
 }
 
 impl Psx {
@@ -120,6 +124,7 @@ impl Psx {
             sio: sio::Sio::new(),
             pio: pio::Pio::disconnected(),
             putchar_buf: None,
+            shutdown: None,
         })
     }
 
@@ -492,6 +497,16 @@ impl Psx {
         }
 
         if let Some(offset) = map::EXPANSION_2.contains(abs_addr) {
+            if offset == 0x14 {
+                let v = val.as_u32();
+
+                if v & 0xffff_0000 == 0xdead_0000 {
+                    let code = v as u16;
+                    info!("Shutdown requested with code {code}");
+                    self.shutdown = Some(code);
+                    return;
+                }
+            }
             warn!("Unhandled write to expansion 2 register {:x}", offset);
             return;
         }

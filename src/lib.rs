@@ -720,6 +720,10 @@ impl libretro::Context for Context {
 
             device.new_frame();
         }
+
+        if self.psx.shutdown.is_some() {
+            libretro::shutdown();
+        }
     }
 
     fn get_system_av_info(&self) -> libretro::SystemAvInfo {

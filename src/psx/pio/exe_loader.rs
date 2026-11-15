@@ -186,6 +186,11 @@ impl ExeLoader {
             Li(T0, self.entry),
             Jalr(RA, T0),
             Nop,
+            // Write to the magic shutdown register
+            Li(T0, SHUTDOWN_REG),
+            Lui(T1, 0xdead),
+            Or(T1, T1, V0),
+            Sw(T1, T0, 0),
             // We're done, there's probably no point in returning to
             // the caller, let's loop infinitely. If we wanted to
             // return to the caller we'd have to save the registers
@@ -348,3 +353,6 @@ const LOADER_ENTRY_OFFSET: u32 = 0x200;
 
 /// Absolute address of the entry point for the loader code
 const LOADER_ENTRY_ADDRESS: u32 = map::EXPANSION_1.start() + LOADER_ENTRY_OFFSET;
+
+/// Magic register register that triggers a shutdown when we write `0xdead_0000 | exit_code` to it.
+const SHUTDOWN_REG: u32 = map::EXPANSION_2.start() + 0x14;
