@@ -516,6 +516,10 @@ pub fn load<T: Addressable>(psx: &mut Psx, off: u32) -> T {
     }
 
     let v = match off {
+        // I think this is correct over calling dma_load which updates the dma_block_* vars. The
+        // rationale is that I expect that this part of the test machine is handled within the DMA
+        // engine, not the MDEC. Not tested on hardware, however.
+        0 => psx.mdec.output_fifo.pop(),
         4 => psx.mdec.status(),
         _ => unimplemented!("Unhandled MDEC load: {:08x}", off),
     };
