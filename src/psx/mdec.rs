@@ -275,8 +275,8 @@ impl MDec {
         r.set_bit(28, self.dma_can_write());
 
         r.set_bit(29, self.state.is_busy());
-        r.set_bit(30, !self.input_fifo.is_full());
-        r.set_bit(31, !self.output_fifo.is_empty());
+        r.set_bit(30, self.input_fifo.is_full());
+        r.set_bit(31, self.output_fifo.is_empty());
 
         r
     }
