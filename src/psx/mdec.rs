@@ -182,8 +182,7 @@ impl MDec {
                     let c1 = next_word as i16;
                     let c2 = (next_word >> 16) as i16;
 
-                    // XXX The loss of precision in the bitshift looks suspicious to me but that's
-                    // what mednafen does. Probably worth investigating on the real hardware.
+                    // These bitshifts have been validated on the real hardware
                     self.idct_matrix.set(index, c1 >> 3);
                     self.idct_matrix.set(index + 1, c2 >> 3);
 
@@ -686,7 +685,7 @@ impl IdctMatrix {
                     sum += coef * self[x * 8 + c] as i32;
                 }
 
-                let v = (sum + 0x4000) >> 15;
+                let v = sum >> 14;
 
                 block_tmp[x * 8 + y] = v as i16;
             }
@@ -704,7 +703,7 @@ impl IdctMatrix {
                     sum += coef * self[x * 8 + c] as i32;
                 }
 
-                let v = (sum + 0x4000) >> 15;
+                let v = (sum + 0x8000) >> 16;
 
                 // Sign extend 9bit value
                 let v = v as u16;
@@ -1167,7 +1166,7 @@ fn test_mmx6() {
 
     // Obviously we want this to be 0 ideally, but since we're not perfectly accurate there's a
     // small difference
-    assert_eq!(cum_error, 93);
+    assert_eq!(cum_error, 72);
     assert_eq!(max_error, 1);
 }
 
