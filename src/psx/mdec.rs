@@ -1011,6 +1011,166 @@ fn test_quantize_ac() {
     assert_eq!(quantize(1003, 80, Some(3)), -10072);
 }
 
+/// Full 24bpp decode from MegaMan X6.
+///
+/// The output is from a run on my SCPH-1002
+#[test]
+fn test_mmx6() {
+    let mut mdec = MDec::new();
+
+    // Reset
+    mdec.set_control(1 << 31);
+    mdec.run(100);
+
+    // We shouldn't be busy.
+    assert_eq!(mdec.status() & (1 << 29), 0);
+
+    // FIFO should be empty
+    assert_eq!(mdec.status() & (1 << 31), 1 << 31);
+
+    // FIFO shouldn't be full
+    assert_eq!(mdec.status() & (1 << 30), 0);
+
+    // Command: load Quant matrices, color
+    mdec.push_command((2 << 29) | 1);
+    mdec.run(100);
+
+    const QUANT_WORDS: [u32; 32] = [
+        0x13101002, 0x16161310, 0x16161616, 0x1b1a181a, 0x1a1a1b1b, 0x1b1b1a1a, 0x1d1d1d1b,
+        0x1d222222, 0x1b1b1d1d, 0x20201d1d, 0x26252222, 0x22232325, 0x28262623, 0x30302828,
+        0x38382e2e, 0x5345453a, 0x13101002, 0x16161310, 0x16161616, 0x1b1a181a, 0x1a1a1b1b,
+        0x1b1b1a1a, 0x1d1d1d1b, 0x1d222222, 0x1b1b1d1d, 0x20201d1d, 0x26252222, 0x22232325,
+        0x28262623, 0x30302828, 0x38382e2e, 0x5345453a,
+    ];
+
+    for &q in QUANT_WORDS.iter() {
+        assert_eq!(mdec.status() & (1 << 30), 0);
+        mdec.push_command(q);
+        mdec.run(10);
+    }
+
+    assert_eq!(mdec.status() & (1 << 30), 0);
+
+    // Command: load IDCT matrix
+    mdec.push_command(3 << 29);
+
+    const IDCT_WORDS: [u32; 32] = [
+        0x5a805a80, 0x5a805a80, 0x5a805a80, 0x5a805a80, 0x6a687d88, 0x18f84718, 0xb8e0e700,
+        0x82709590, 0x30f87640, 0x89b8cf00, 0xcf0089b8, 0x764030f8, 0xe7006a68, 0xb8e08270,
+        0x7d884718, 0x959018f8, 0xa5785a80, 0x5a80a578, 0xa5785a80, 0x5a80a578, 0x82704718,
+        0x6a6818f8, 0xe7009590, 0xb8e07d88, 0x89b830f8, 0xcf007640, 0x7640cf00, 0x30f889b8,
+        0xb8e018f8, 0x82706a68, 0x95907d88, 0xe7004718,
+    ];
+
+    for &w in IDCT_WORDS.iter() {
+        assert_eq!(mdec.status() & (1 << 30), 0);
+        mdec.push_command(w);
+        mdec.run(10);
+    }
+
+    assert_eq!(mdec.status() & (1 << 30), 0);
+
+    // Command: decode, 24bpp, block size 20
+    mdec.push_command((1 << 29) | (2 << 27) | 20);
+    mdec.run(10);
+
+    const RLE_HWORDS: [u16; 40] = [
+        0x0400, 0xfe00, 0x0400, 0xfe00, 0x061a, 0x0005, 0x0005, 0x0bff, 0x03fe, 0x03fd, 0x03ff,
+        0x0001, 0x0bff, 0x03ff, 0x33ff, 0xfe00, 0x0615, 0x0001, 0x0004, 0x0bff, 0x1c01, 0x0001,
+        0xfe00, 0x0609, 0x0404, 0x0401, 0x0001, 0x0001, 0x0001, 0x0401, 0x2801, 0xfe00, 0x0609,
+        0x0404, 0x03ff, 0x0401, 0x03ff, 0x0801, 0x0fff, 0xfe00,
+    ];
+
+    for pair in RLE_HWORDS.chunks_exact(2) {
+        let (lo, hi) = (u32::from(pair[0]), u32::from(pair[1]));
+
+        let w = lo | (hi << 16);
+
+        assert_eq!(mdec.status() & (1 << 30), 0);
+        mdec.push_command(w);
+        mdec.run(10);
+    }
+
+    let mut out = Vec::new();
+
+    for _ in 0..192 {
+        // Wait for data
+        for _ in 0..200 {
+            mdec.run(10);
+            if mdec.status() & (1 << 31) == 0 {
+                break;
+            }
+        }
+        assert_eq!(
+            mdec.status() & (1 << 31),
+            0,
+            "Timeout while waiting on data"
+        );
+
+        out.push(mdec.output_fifo.pop());
+    }
+
+    // Output from SCPH-1002
+    const REF_OUT: [u32; 192] = [
+        0x09050505, 0x0c0c0909, 0x0c0c0c0c, 0x080b0b0b, 0x05050808, 0x06060605, 0x09050505,
+        0x0b0b0909, 0x0b0b0b0b, 0x070a0a0a, 0x05050707, 0x06060605, 0x09060606, 0x0a0a0909,
+        0x0909090a, 0x05080808, 0x04040505, 0x05050504, 0x09080808, 0x09090909, 0x08080809,
+        0x04060606, 0x04040404, 0x05050504, 0x09090909, 0x08080909, 0x07070708, 0x04050505,
+        0x05050404, 0x06060605, 0x08090909, 0x07070808, 0x06060607, 0x04040404, 0x05050404,
+        0x06060605, 0x06070707, 0x06060606, 0x05050506, 0x03030303, 0x05050303, 0x05050505,
+        0x05060606, 0x05050505, 0x05050505, 0x03030303, 0x05050303, 0x04040405, 0x06070707,
+        0x06060606, 0x07070706, 0x07080808, 0x06060707, 0x06060606, 0x06070707, 0x06060606,
+        0x07070706, 0x07070707, 0x06060707, 0x06060606, 0x06060606, 0x06060606, 0x07070706,
+        0x06070707, 0x05050606, 0x05050505, 0x05060606, 0x06060505, 0x06060606, 0x05060606,
+        0x05050505, 0x05050505, 0x05050505, 0x05050505, 0x06060605, 0x05060606, 0x04040505,
+        0x05050504, 0x04040404, 0x05050404, 0x06060605, 0x04050505, 0x04040404, 0x04040404,
+        0x04040404, 0x05050404, 0x05050505, 0x03050505, 0x03030303, 0x04040403, 0x04040404,
+        0x05050404, 0x05050505, 0x03040404, 0x03030303, 0x04040403, 0x05060606, 0x04040505,
+        0x03030304, 0x04040404, 0x04040404, 0x04040404, 0x03040404, 0x02020303, 0x02020202,
+        0x03020202, 0x03030303, 0x03030303, 0x03040404, 0x02020303, 0x02020202, 0x03020202,
+        0x03030303, 0x03030303, 0x03030303, 0x02020303, 0x02020202, 0x03030303, 0x03030303,
+        0x03030303, 0x02020202, 0x01010202, 0x02020201, 0x02020202, 0x02020202, 0x02020202,
+        0x02020202, 0x01010202, 0x02020201, 0x03020202, 0x02020303, 0x02020202, 0x01020202,
+        0x01010101, 0x02020201, 0x02020202, 0x02020202, 0x01010102, 0x00000000, 0x00000000,
+        0x00000000, 0x01010101, 0x01010101, 0x00000001, 0x04030303, 0x05050404, 0x04040405,
+        0x02030303, 0x03030202, 0x05050503, 0x03030303, 0x04040303, 0x03030304, 0x02020202,
+        0x03030202, 0x04040403, 0x03020202, 0x03030303, 0x03030303, 0x02020202, 0x03030202,
+        0x04040403, 0x03020202, 0x03030303, 0x03030303, 0x02020202, 0x03030202, 0x03030303,
+        0x03030303, 0x03030303, 0x03030303, 0x02020202, 0x03030202, 0x03030303, 0x02020202,
+        0x02020202, 0x02020202, 0x02020202, 0x02020202, 0x03030302, 0x01010101, 0x01010101,
+        0x01010101, 0x01010101, 0x01010101, 0x01010101, 0x00010101, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000,
+    ];
+
+    assert_eq!(REF_OUT.len(), out.len());
+
+    let mut cum_error = 0u32;
+    let mut max_error = 0u32;
+
+    for (&g, &e) in out.iter().zip(REF_OUT.iter()) {
+        if g == e {
+            println!("{g:08x} {e:08x} OK");
+        } else {
+            let dif = g ^ e;
+            println!("{g:08x} {e:08x} NOK {dif:08x}");
+
+            for (&a, &b) in g.to_le_bytes().iter().zip(e.to_le_bytes().iter()) {
+                let a = a as i32;
+                let b = b as i32;
+
+                let d = a.abs_diff(b);
+                cum_error += d;
+                max_error = max_error.max(d);
+            }
+        }
+    }
+
+    // Obviously we want this to be 0 ideally, but since we're not perfectly accurate there's a
+    // small difference
+    assert_eq!(cum_error, 93);
+    assert_eq!(max_error, 1);
+}
+
 #[test]
 fn test_idct() {
     let coeffs = MacroblockCoeffs {
