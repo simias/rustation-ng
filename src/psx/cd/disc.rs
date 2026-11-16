@@ -117,6 +117,13 @@ impl Region {
 pub struct SerialNumber([u8; 10]);
 
 impl SerialNumber {
+    /// Placeholder Japanese serial number
+    const UNKN_JP: SerialNumber = SerialNumber(*b"SLPS-99999");
+    /// Placeholder North American serial number
+    const UNKN_NA: SerialNumber = SerialNumber(*b"SCUS-99999");
+    /// Placeholder European serial number
+    const UNKN_EU: SerialNumber = SerialNumber(*b"SLES-99999");
+
     /// Extract a serial number from a standard PlayStation binary
     /// name of the form "aaaa_ddd.dd"
     fn from_bin_name(bin: &[u8]) -> Result<SerialNumber> {
@@ -180,15 +187,17 @@ impl fmt::Debug for SerialNumber {
 
 /// Attempt to discover the region of the disc using the license string stored in the system area
 /// of the official PlayStation ISO filesystem.
-#[allow(dead_code)]
-pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
+pub fn extract_system_region(image: &mut CdCache) -> Result<Region> {
     // In order to identify the type of disc we're going to use sector 00:00:04 from Track01 which
     // should contain the "Licensed by..."  string.
     let toc = image.toc();
     let track = toc.track(Bcd::ONE)?;
     let msf = track.disc_position(Msf::from_bcd(0x00, 0x00, 0x04).unwrap())?;
 
-    let sector = image.read_sector(msf)?;
+    let sector = image.read_sector(msf).map_err(|_| {
+        let m = format!("Couldn't read disc at {msf}");
+        PsxError::BadDiscFormat(m)
+    })?;
 
     // On the discs I've tried we always have an ASCII license string in the first 76 data bytes.
     // We'll see if it holds true for all the discs out there...
@@ -221,9 +230,20 @@ pub fn extract_system_region(image: &mut dyn Image) -> Result<Region> {
 /// Attempt to extract the serial number of the disc. All officially
 /// licensed PlayStation game should have a serial number.
 fn extract_serial_number(image: &mut CdCache) -> Result<SerialNumber> {
-    let system_cnf = read_system_cnf(image)?;
+    match read_system_cnf(image) {
+        Ok(system_cnf) => parse_serial_number_from_system_cnf(&system_cnf),
+        Err(_e) => {
+            warn!("Failed to find SYSTEM.CNF in ISO9660, trying the license sector...");
 
-    parse_serial_number_from_system_cnf(&system_cnf)
+            let sr = match extract_system_region(image)? {
+                Region::Japan => SerialNumber::UNKN_JP,
+                Region::NorthAmerica => SerialNumber::UNKN_NA,
+                Region::Europe => SerialNumber::UNKN_EU,
+            };
+
+            Ok(sr)
+        }
+    }
 }
 
 fn parse_serial_number_from_system_cnf(system_cnf: &[u8]) -> Result<SerialNumber> {
